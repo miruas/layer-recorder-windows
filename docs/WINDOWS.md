@@ -26,7 +26,7 @@ Choose the displays to capture. Select output devices for a system mix, micropho
 
 A selected display resumes after reconnecting or changing mode. Each capture generation has its own source and timeline interval. Enable **Include newly connected displays** to also capture other monitors that appear mid-session. The recorder rediscovers selected audio endpoints during capture.
 
-Replay can save up to five minutes of completed fragments and uses a shared 512 MiB RAM budget. The effective history depends on bitrate and the number of sources. Normal recordings keep replay available. The recorder window keeps the capture session alive.
+Replay can save up to five minutes of completed fragments and uses a shared 512 MiB RAM budget. The effective history depends on bitrate and the number of sources. The recorder shows the available replay duration, encoded RAM use, and active video backend. Normal recordings keep replay available. The recorder window keeps the capture session alive.
 
 Enable **global shortcuts** to use these while Layer is in the background:
 

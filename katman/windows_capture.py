@@ -233,7 +233,8 @@ class Capture:
         self.fps = fps
         self.encoder = encoder
         self.seconds = seconds
-        self.engine = CaptureEngine(seconds, memory_mb * 1024**2)
+        self.memory_bytes = memory_mb * 1024**2
+        self.engine = CaptureEngine(seconds, self.memory_bytes)
         self.selected = {display.key for display in selected}
         self.audio = {source.key: source for source in audio}
         self.follow_displays = follow_displays
@@ -347,6 +348,28 @@ class Capture:
 
     def _status(self):
         return {row["id"]: row for row in self.engine.request("status")["tracks"]}
+
+    def replay_status(self):
+        state = self.engine.request("status")
+        tracks = {track.id: track for track in self.tracks}
+        intervals = []
+        live_ends = []
+        backends = set()
+        for row in state["tracks"]:
+            track = tracks[row["id"]]
+            if track.kind != "video" or not row["count"]:
+                continue
+            start = row["started"]
+            end = start + row["last"] + 1
+            intervals.append((start + row["first"], end))
+            if not track.stopped:
+                live_ends.append(end)
+                backends.add(track.backend)
+        seconds = 0
+        if intervals:
+            end = min(live_ends) if live_ends else max(last for _, last in intervals)
+            seconds = max(0, min(self.seconds, end - min(first for first, _ in intervals)))
+        return seconds, state["bytes"], sorted(backends)
 
     def _prune(self):
         if self.record_folder:

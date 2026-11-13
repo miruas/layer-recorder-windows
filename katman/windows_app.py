@@ -84,6 +84,7 @@ def capture_controls(library):
     panel = ttk.Frame(root, padding=20)
     panel.pack(fill="both", expand=True)
     status = tk.StringVar(value="Select the displays you want to capture.")
+    replay_status = tk.StringVar()
     options = []
     audio_options = []
     last_audio_inventory = None
@@ -202,7 +203,9 @@ def capture_controls(library):
                 inventory = read_audio_inventory()
             except (ImportError, OSError, RuntimeError) as error:
                 audio_error = str(error)
-        return session.reconcile(displays(), inventory), audio_error
+        count = session.reconcile(displays(), inventory)
+        seconds, used, backends = session.replay_status()
+        return count, audio_error, seconds, used, backends
 
     def submit(action, task):
         nonlocal busy
@@ -299,6 +302,9 @@ def capture_controls(library):
     ttk.Button(panel, text="Open editor", command=open_editor).grid(row=7, column=1, sticky="w", pady=8)
     ttk.Label(panel, textvariable=status, wraplength=430).grid(row=8, column=0, columnspan=3, sticky="w")
 
+    ttk.Label(panel, textvariable=replay_status, wraplength=490).grid(
+        row=15, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
     def update_buttons():
         idle = not busy and capture is None
         active = not busy and capture is not None
@@ -336,6 +342,7 @@ def capture_controls(library):
                 status.set("Recording · Replay is also active" if mode == "record" else "Replay active")
             if action == "stop":
                 capture, mode = None, None
+                replay_status.set("")
             if action == "audio_inventory":
                 if error:
                     audio_message.set(error)
@@ -345,7 +352,14 @@ def capture_controls(library):
                 if error:
                     status.set(error)
                 else:
-                    count, audio_error = value
+                    count, audio_error, seconds, used, backends = value
+                    backend_names = {"ddagrab": "Desktop Duplication", "gdigrab": "GDI"}
+                    active_backends = ", ".join(backend_names[name] for name in backends)
+                    if seconds:
+                        replay_status.set(f"Replay available: {int(seconds)} s  ·  RAM: {used / 2**20:.0f} MiB"
+                                          + (f"  ·  {active_backends}" if active_backends else ""))
+                    else:
+                        replay_status.set("Replay is warming up." if count else "Waiting for video.")
                     if audio_error:
                         audio_message.set(audio_error)
                     if not count:
