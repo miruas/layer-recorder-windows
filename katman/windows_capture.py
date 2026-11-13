@@ -28,6 +28,11 @@ class Display:
     width: int
     height: int
     primary: bool = False
+    device_id: str = ""
+
+    @property
+    def key(self):
+        return self.device_id or self.name
 
 
 def displays():
@@ -38,6 +43,13 @@ def displays():
                     ("work", wintypes.RECT), ("flags", wintypes.DWORD),
                     ("device", wintypes.WCHAR * 32)]
 
+    class DisplayDevice(ctypes.Structure):
+        _fields_ = [("size", wintypes.DWORD), ("name", wintypes.WCHAR * 32),
+                    ("description", wintypes.WCHAR * 128), ("flags", wintypes.DWORD),
+                    ("device_id", wintypes.WCHAR * 128), ("registry_key", wintypes.WCHAR * 128)]
+
+    user32.EnumDisplayDevicesW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
+                                          ctypes.POINTER(DisplayDevice), wintypes.DWORD]
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HANDLE, wintypes.HDC,
                                        ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
     user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
@@ -54,8 +66,12 @@ def displays():
         if not user32.GetMonitorInfoW(handle, ctypes.byref(info)):
             return False
         r = info.monitor
+        device = DisplayDevice()
+        device.size = ctypes.sizeof(device)
+        device_id = device.device_id if user32.EnumDisplayDevicesW(
+            info.device, 0, ctypes.byref(device), 1) else ""
         result.append(Display(info.device.removeprefix("\\\\.\\"), r.left, r.top,
-                              r.right - r.left, r.bottom - r.top, bool(info.flags & 1)))
+                              r.right - r.left, r.bottom - r.top, bool(info.flags & 1), device_id))
         return True
 
     previous = user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
@@ -140,20 +156,59 @@ class ReplayBuffer:
     def add(self, fragment):
         self.fragments.append(fragment)
         self.bytes += fragment.size
-        while (self.bytes > self.byte_limit or
-               (len(self.fragments) > 1 and
-                self.fragments[1].start <= fragment.start - self.seconds)):
-            self.bytes -= self.fragments.popleft().size
+        while (self.fragments and
+               (self.bytes > self.byte_limit or
+                (len(self.fragments) > 1 and
+                 self.fragments[1].start <= fragment.start - self.seconds))):
+            self.evict()
+
+    def evict(self):
+        self.bytes -= self.fragments.popleft().size
+
+
+class ReplayBudget:
+    def __init__(self, limit):
+        self.limit = limit
+        self.lock = threading.RLock()
+        self.tracks = []
+
+    def add(self, track, fragment):
+        with self.lock:
+            track.replay.add(fragment)
+            self._trim(time.monotonic())
+
+    def _trim(self, now):
+        candidates = []
+        total = 0
+        for index, track in enumerate(self.tracks):
+            ring = track.replay
+            while (ring.fragments and
+                   track.started + ring.fragments[0].start + 1 < now - ring.seconds):
+                ring.evict()
+            if ring.fragments:
+                candidates.append((track.started + ring.fragments[0].start, index, track))
+                total += ring.bytes
+        while total > self.limit:
+            _, _, track = min(candidates)
+            ring = track.replay
+            total -= ring.fragments[0].size
+            ring.evict()
+            candidates = [(item.started + item.replay.fragments[0].start, index, item)
+                          for _, index, item in candidates if item.replay.fragments]
 
 
 class Track:
-    def __init__(self, display, command, fps, seconds, byte_limit, recording=None):
-        self.display = display
+    def __init__(self, source, command, fps, seconds, budget, media=None, timescale=TIMESCALE):
+        self.source = source
+        self.media = media
+        self.timescale = timescale
+        self.kind = "video" if isinstance(source, Display) else "audio"
         self.command = command
         self.fps = fps
-        self.replay = ReplayBuffer(seconds, byte_limit)
-        self.recording = recording
-        self.lock = threading.Lock()
+        self.budget = budget
+        self.replay = ReplayBuffer(seconds, budget.limit)
+        self.recording = media.open("wb") if media else None
+        self.lock = budget.lock
         self.init = []
         self.started = None
         self.error = None
@@ -162,6 +217,7 @@ class Track:
 
     def start(self):
         self.log = deque(maxlen=8)
+        self.launched = time.monotonic()
         self.process = subprocess.Popen(
             self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -183,12 +239,12 @@ class Track:
                 if kind == b"moof":
                     pending = box
                 elif kind == b"mdat" and pending is not None:
-                    fragment = Fragment(fragment_timestamp(pending)[2] / TIMESCALE, pending, box)
+                    fragment = Fragment(fragment_timestamp(pending)[2] / self.timescale, pending, box)
                     with self.lock:
                         if self.started is None:
-                            # The first complete fragment is flushed at the next keyframe.
-                            self.started = time.monotonic() - 1.0
-                        self.replay.add(fragment)
+                            # The first complete fragment usually flushes after one second.
+                            self.started = max(self.launched, time.monotonic() - 1.0)
+                        self.budget.add(self, fragment)
                     pending = None
                 elif kind in {b"ftyp", b"moov"}:
                     with self.lock:
@@ -242,37 +298,59 @@ class Track:
             return self.started, tuple(self.init), tuple(self.replay.fragments)
 
 
-def project_data(folder, kind, tracks, requested_seconds=None):
+def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
     sources = []
-    for track, media, first, offset in tracks:
-        info = probe(media)
-        stream = next(s for s in info["streams"] if s["codec_type"] == "video")
-        available = float(stream.get("duration", info["format"]["duration"]))
+    warnings = list(warnings)
+    for track, media, start in tracks:
+        try:
+            info = probe(media)
+            stream = next(s for s in info["streams"] if s["codec_type"] == track.kind)
+            available = float(stream.get("duration", info["format"]["duration"]))
+        except (OSError, subprocess.SubprocessError, KeyError, ValueError, StopIteration) as error:
+            warnings.append(f"{track.source.name}: saved media could not be read ({error}).")
+            continue
         if available <= 0:
-            raise ValueError(f"No video frames were saved for {track.display.name}.")
-        source = {**asdict(track.display), "id": media.stem, "type": "video",
-                  "file": media.relative_to(folder).as_posix(), "enabled": True, "gain": 1,
-                  "backend": "gdigrab", "media_duration": available,
-                  "logical_width": track.display.width, "logical_height": track.display.height,
-                  "width": stream["width"], "height": stream["height"],
-                  "timeline_start": offset + first, "trim_in": 0}
-        sources.append(source)
-    end_of_source = [s["timeline_start"] + s["media_duration"] for s in sources]
-    end = min(end_of_source) if kind == "replay" else max(end_of_source)
-    cut = max(0, end - requested_seconds) if requested_seconds is not None else 0
-    sources = [s for s in sources if s["timeline_start"] + s["media_duration"] > cut]
+            continue
+        if track.kind == "video":
+            display = track.source
+            metadata = {"name": display.name, "x": display.x, "y": display.y,
+                        "backend": "gdigrab", "logical_width": display.width,
+                        "logical_height": display.height, "width": stream["width"],
+                        "height": stream["height"]}
+        else:
+            metadata = track.source.metadata
+        sources.append({**metadata, "id": media.stem, "type": track.kind,
+                        "file": media.relative_to(folder).as_posix(), "enabled": True,
+                        "gain": 1, "media_duration": available, "timeline_start": start,
+                        "trim_in": 0})
+    if not sources:
+        raise RuntimeError("No complete media was available to save.")
+    if end is None:
+        end = max(s["timeline_start"] + s["media_duration"] for s in sources)
+    if cutoff is None:
+        cutoff = min(s["timeline_start"] for s in sources)
+    sources = [s for s in sources if s["timeline_start"] < end and
+               s["timeline_start"] + s["media_duration"] > cutoff]
     for source in sources:
-        relative_start = source["timeline_start"] - cut
+        relative_start = source["timeline_start"] - cutoff
         source["trim_in"] = max(0, -relative_start)
         source["timeline_start"] = max(0, relative_start)
-    return {"format": "katman", "version": 1, "id": uuid.uuid4().hex, "name": "Desktop",
-            "application": "Desktop", "kind": kind, "created": datetime.now().astimezone().isoformat(),
-            "fps": tracks[0][0].fps, "duration": end - cut, "sources": sources, "sections": []}
+    if not sources or end <= cutoff:
+        raise RuntimeError("No sources overlap the saved interval.")
+    project = {"format": "katman", "version": 1, "id": uuid.uuid4().hex, "name": "Desktop",
+               "application": "Desktop", "kind": kind, "created": datetime.now().astimezone().isoformat(),
+               "fps": tracks[0][0].fps, "duration": end - cutoff, "sources": sources,
+               "sections": [], "warnings": list(warnings)}
+    # The timeline compositor stops drawing a retired source when its clip ends.
+    from .studio_model import from_project
+    project["studio"] = from_project(project)
+    return project
 
 
 class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
-                 memory_mb=512, record=False):
+                 memory_mb=512, record=False, *, audio=(), follow_displays=False,
+                 follow_application_audio=False):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -282,92 +360,175 @@ class Capture:
         self.library = Path(library).expanduser().resolve()
         self.library.mkdir(parents=True, exist_ok=True)
         self.record_folder = Path(tempfile.mkdtemp(prefix="Layer-recording-", dir=self.library)) if record else None
-        self.tracks = []
+        self.fps = fps
+        self.encoder = encoder
+        self.seconds = seconds
+        self.budget = ReplayBudget(memory_mb * 1024**2)
+        self.selected = {display.key for display in selected}
+        self.audio = {source.key: source for source in audio}
+        self.follow_displays = follow_displays
+        self.follow_application_audio = follow_application_audio
+        self.tracks = self.budget.tracks
+        self.active = {}
+        self.serial = 0
+        self.retry_at = {}
+        self.warnings = deque(maxlen=20)
+        self.final_project = None
         if self.record_folder:
             (self.record_folder / "media").mkdir()
         try:
-            for i, display in enumerate(selected, 1):
-                command = capture_command(display, fps, encoder)
-                path = self.record_folder / "media" / f"display-{i}.mp4" if self.record_folder else None
-                track = Track(display, command, fps, seconds, memory_mb * 1024**2 // len(selected),
-                              path.open("wb") if path else None)
-                try:
-                    track.start()
-                except OSError:
-                    if track.recording:
-                        track.recording.close()
-                    raise
-                self.tracks.append(track)
+            for source in selected:
+                self._start_track(source)
+            for source in audio:
+                self._try_start(source)
         except Exception:
             self.stop()
             if self.record_folder:
                 shutil.rmtree(self.record_folder)
             raise
 
+    def _start_track(self, source):
+        self.serial += 1
+        if isinstance(source, Display):
+            command = capture_command(source, self.fps, self.encoder)
+            stem, timescale = "display", TIMESCALE
+        else:
+            from .windows_audio import AUDIO_TIMESCALE, capture_audio_command
+            command = capture_audio_command(source)
+            stem, timescale = "audio", AUDIO_TIMESCALE
+        path = self.record_folder / "media" / f"{stem}-{self.serial}.mp4" if self.record_folder else None
+        track = Track(source, command, self.fps, self.seconds, self.budget, path, timescale)
+        with self.budget.lock:
+            self.tracks.append(track)
+        try:
+            track.start()
+        except OSError:
+            with self.budget.lock:
+                self.tracks.remove(track)
+            if track.recording:
+                track.recording.close()
+            if path:
+                path.unlink(missing_ok=True)
+            raise
+        self.active[source.key] = track
+
+    def _try_start(self, source):
+        try:
+            self._start_track(source)
+        except (OSError, RuntimeError, ValueError) as error:
+            self.warnings.append(f"{source.name}: {error}")
+            self.retry_at[source.key] = time.monotonic() + 5
+
+    def _retire(self, key):
+        track = self.active.pop(key)
+        error = track.stop()
+        if error:
+            self.warnings.append(f"{track.source.name}: {error}")
+
+    def reconcile(self, current, current_audio=None):
+        """Reconcile device generations on the capture-control worker."""
+        desired = {display.key: display for display in current
+                   if self.follow_displays or display.key in self.selected}
+        if current_audio is None:
+            desired.update(self.audio)
+            desired.update((key, track.source) for key, track in self.active.items()
+                           if track.kind == "audio")
+        else:
+            desired.update((source.key, source) for source in current_audio
+                           if source.key in self.audio or
+                           (self.follow_application_audio and source.kind == "application"))
+        now = time.monotonic()
+        for key, track in tuple(self.active.items()):
+            source = desired.get(key)
+            if source is None or source != track.source or track.process.poll() is not None:
+                self._retire(key)
+                if source == track.source:
+                    self.retry_at[key] = now + 5
+        for key, source in desired.items():
+            if key not in self.active and now >= self.retry_at.get(key, 0):
+                self._try_start(source)
+        self.retry_at = {key: value for key, value in self.retry_at.items() if key in desired}
+        self._prune(time.monotonic())
+        return sum(track.kind == "video" for track in self.active.values())
+
+    def _prune(self, now):
+        with self.budget.lock:
+            self.budget._trim(now)
+            if not self.record_folder:
+                self.tracks[:] = [track for track in self.tracks
+                                  if not track.stopped or track.replay.fragments]
+
     def failure(self):
-        for track in self.tracks:
+        for track in self.active.values():
             error = track.failure()
             if error:
-                return f"{track.display.name}: {error}"
+                return f"{track.source.name}: {error}"
             if track.process.poll() is not None:
-                return f"{track.display.name}: capture stopped unexpectedly."
+                return f"{track.source.name}: capture stopped unexpectedly."
         return None
 
     def stop(self):
-        failures = []
-        for track in self.tracks:
-            error = track.stop()
-            if error:
-                failures.append(f"{track.display.name}: {error}")
-        return failures
+        for key in tuple(self.active):
+            self._retire(key)
+        return list(self.warnings)
 
     def finish_recording(self):
         if not self.record_folder:
             raise RuntimeError("No ordinary recording is active.")
-        failures = self.stop()
-        snapshots = [(track, track.snapshot()[0]) for track in self.tracks]
-        if not all(start is not None for _, start in snapshots):
-            raise RuntimeError(f"Recording is too short or a source failed. Media: {self.record_folder}. "
-                               + " ".join(failures))
-        origin = min(start for _, start in snapshots)
-        tracks = [(track, self.record_folder / "media" / f"display-{i}.mp4", 0, start - origin)
-                  for i, (track, start) in enumerate(snapshots, 1)]
+        if self.final_project:
+            return self.final_project
+        self.stop()
+        tracks = [(track, track.media, start) for track in self.tracks
+                  if (start := track.snapshot()[0]) is not None]
+        if not tracks:
+            raise RuntimeError(f"No media was completed. Recording folder: {self.record_folder}. "
+                               + " ".join(self.warnings))
         path = self.record_folder / "project.katman"
-        project = project_data(self.record_folder, "recording", tracks)
-        project["warnings"] = failures
-        atomic_json(path, project)
+        atomic_json(path, project_data(self.record_folder, "recording", tracks,
+                                       warnings=self.warnings))
+        self.final_project = path
         return path
 
     def save_replay(self, seconds):
-        snapshots = [(track, *track.snapshot()) for track in self.tracks]
-        if not all(start is not None and fragments for _, start, _, fragments in snapshots):
-            raise RuntimeError("Replay is still warming up, or the memory budget is too small.")
-        origin = min(start for _, start, _, _ in snapshots)
-        if not 0 < seconds <= self.tracks[0].replay.seconds:
+        if not 0 < seconds <= self.seconds:
             raise ValueError("Replay duration must fit inside the configured buffer.")
-        cutoff = min(start - origin + fragments[-1].start + 1
-                     for _, start, _, fragments in snapshots) - seconds
+        with self.budget.lock:
+            self._prune(time.monotonic())
+            snapshots = []
+            for track in self.tracks:
+                start, init, fragments = track.snapshot()
+                if start is not None and init and fragments:
+                    snapshots.append((track, start, init, fragments))
+        if not snapshots:
+            raise RuntimeError("Replay is still warming up, or the memory budget is too small.")
+        bounds = [(start + fragments[-1].start + 1, track) for track, start, _, fragments in snapshots]
+        live_video = [end for end, track in bounds if not track.stopped and track.kind == "video"]
+        end = min(live_video) if live_video else max(end for end, _ in bounds)
+        cutoff = max(min(start + fragments[0].start for _, start, _, fragments in snapshots), end - seconds)
         folder = Path(tempfile.mkdtemp(prefix="Layer-replay-", dir=self.library))
         try:
             (folder / "media").mkdir()
             tracks = []
             for i, (track, start, init, fragments) in enumerate(snapshots, 1):
-                offset = start - origin
-                first = max((j for j, frag in enumerate(fragments) if offset + frag.start <= cutoff),
+                if start + fragments[-1].start + 1 <= cutoff or start + fragments[0].start >= end:
+                    continue
+                first = max((j for j, frag in enumerate(fragments) if start + frag.start <= cutoff),
                             default=0)
-                media = folder / "media" / f"display-{i}.mp4"
+                media = folder / "media" / f"{track.kind}-{i}.mp4"
                 with media.open("wb") as output:
                     output.writelines(init)
                     base = fragment_timestamp(fragments[first].moof)[2]
                     for fragment in fragments[first:]:
+                        if start + fragment.start >= end:
+                            break
                         fmt, position, timestamp = fragment_timestamp(fragment.moof)
                         moof = bytearray(fragment.moof)
                         struct.pack_into(fmt, moof, position, timestamp - base)
                         output.write(moof)
                         output.write(fragment.mdat)
-                tracks.append((track, media, fragments[first].start, offset))
+                tracks.append((track, media, start + fragments[first].start))
             path = folder / "project.katman"
-            atomic_json(path, project_data(folder, "replay", tracks, seconds))
+            atomic_json(path, project_data(folder, "replay", tracks, cutoff, end, self.warnings))
             return path
         except Exception:
             shutil.rmtree(folder)

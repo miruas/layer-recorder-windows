@@ -1,9 +1,9 @@
-include LICENSE UPSTREAM.md NOTICE.md README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md install.py run.sh
+include LICENSE UPSTREAM.md NOTICE.md README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md install.py run.sh Layer.cmd
 recursive-include katman *.py *.svg *.json
 recursive-include tests *.py
 recursive-include docs *.md
 recursive-include examples *.json *.conf
-recursive-include tools *.py
+recursive-include tools *.py *.ps1
 recursive-include patches *.patch
 recursive-include licenses *
 recursive-include packaging *.json

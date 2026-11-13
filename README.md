@@ -1,6 +1,6 @@
 # Layer — GPU Screen Recorder fork
 
-**Windows preview:** see [Windows installation, capture and export](docs/WINDOWS.md). The rest of this README describes the original Linux version.
+**Windows:** see [installation, recording, replay and Studio](docs/WINDOWS.md). The rest of this README describes the original Linux version.
 
 A **GPL-3.0-only source fork of GPU Screen Recorder**, with a native independent-track editor. The original recorder is developed by dec05eba; its source, copyright notices and Git history are preserved here. See [upstream provenance and fork changes](UPSTREAM.md).
 

@@ -10,9 +10,11 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 
 from .common import APP, SETTINGS_FILE
 from .windows_capture import Capture, displays
+from .windows_hotkeys import GlobalHotkeys
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
 
@@ -78,14 +80,19 @@ def capture_controls(library):
 
     root = tk.Tk()
     root.title("Layer Recorder")
-    root.minsize(470, 360)
+    root.minsize(540, 520)
     panel = ttk.Frame(root, padding=20)
     panel.pack(fill="both", expand=True)
     status = tk.StringVar(value="Select the displays you want to capture.")
     options = []
+    audio_options = []
+    last_audio_inventory = None
     capture = None
     mode = None
-    capture_failure = None
+    hotkeys = None
+    next_inventory = 0.0
+    next_audio_inventory = 0.0
+    active_display_count = None
     busy = False
     closing = False
     results = queue.SimpleQueue()
@@ -102,10 +109,10 @@ def capture_controls(library):
             return
         for control in monitor_panel.winfo_children():
             control.destroy()
-        selected = {display.name: flag.get() for display, flag in options}
+        selected = {display.key: flag.get() for display, flag in options}
         options.clear()
         for display in found:
-            flag = tk.BooleanVar(value=selected.get(display.name, display.primary))
+            flag = tk.BooleanVar(value=selected.get(display.key, display.primary))
             caption = f"{display.name} · {display.width} × {display.height}"
             if display.primary:
                 caption += " · Primary"
@@ -126,6 +133,77 @@ def capture_controls(library):
     refresh_button.grid(row=3, column=2, sticky="ew", padx=(10, 0))
     ttk.Separator(panel).grid(row=4, column=0, columnspan=3, sticky="ew", pady=14)
 
+    follow_displays = tk.BooleanVar(value=False)
+    follow_apps = tk.BooleanVar(value=False)
+    capture_all_displays = ttk.Checkbutton(panel, text="Include newly connected displays", variable=follow_displays)
+    capture_all_displays.grid(row=9, column=0, columnspan=3, sticky="w", pady=(12, 0))
+
+    audio_panel = ttk.LabelFrame(panel, text="Independent audio sources", padding=6)
+    audio_panel.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+    audio_select = tk.Listbox(audio_panel, selectmode="multiple", exportselection=False, height=5)
+    audio_select.pack(side="left", fill="both", expand=True)
+    scrollbar = ttk.Scrollbar(audio_panel, orient="vertical", command=audio_select.yview)
+    scrollbar.pack(side="right", fill="y")
+    audio_select.configure(yscrollcommand=scrollbar.set)
+    capture_all_apps = ttk.Checkbutton(panel, text="Include newly active applications", variable=follow_apps)
+    capture_all_apps.grid(row=11, column=0, columnspan=3, sticky="w")
+    audio_message = tk.StringVar()
+    ttk.Label(panel, textvariable=audio_message, wraplength=490).grid(
+        row=12, column=0, columnspan=3, sticky="w")
+
+    def read_audio_inventory():
+        from .windows_audio import audio_sources
+        return audio_sources()
+
+    def update_audio_inventory(found):
+        nonlocal last_audio_inventory
+        last_audio_inventory = found
+        audio_select.configure(state="normal")
+        chosen = {audio_options[index].key for index in audio_select.curselection()}
+        audio_options[:] = found
+        audio_select.delete(0, "end")
+        for index, source in enumerate(found):
+            audio_select.insert("end", f"{source.name}  ·  {source.kind}")
+            if source.key in chosen:
+                audio_select.selection_set(index)
+        audio_message.set("" if found else "Windows returned no audio sources.")
+
+    def refresh_audio():
+        submit("audio_inventory", read_audio_inventory)
+
+    audio_refresh = ttk.Button(panel, text="Refresh audio", command=refresh_audio)
+    audio_refresh.grid(row=11, column=2, sticky="e")
+
+    def toggle_hotkeys():
+        nonlocal hotkeys
+        if hotkeys:
+            hotkeys.close()
+            hotkeys = None
+        else:
+            try:
+                hotkeys = GlobalHotkeys()
+                if hotkeys.conflicts:
+                    status.set("Unavailable shortcuts: " + ", ".join(hotkeys.conflicts))
+            except OSError as error:
+                hotkey_setting.set(False)
+                status.set(str(error))
+
+    hotkey_setting = tk.BooleanVar(value=False)
+    ttk.Checkbutton(panel, text="Enable global shortcuts", variable=hotkey_setting,
+                    command=toggle_hotkeys).grid(row=13, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    ttk.Label(panel, text="Ctrl+Alt+F8 Record  ·  F9 Replay  ·  F10 Save 1 min  ·  F11 Save 5 min",
+              wraplength=490).grid(row=14, column=0, columnspan=3, sticky="w")
+
+    def sync_sources(session, inspect_audio):
+        inventory = None
+        audio_error = None
+        if inspect_audio:
+            try:
+                inventory = read_audio_inventory()
+            except (ImportError, OSError, RuntimeError) as error:
+                audio_error = str(error)
+        return session.reconcile(displays(), inventory), audio_error
+
     def submit(action, task):
         nonlocal busy
         busy = True
@@ -142,8 +220,19 @@ def capture_controls(library):
     def start(kind):
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
+        sources = [audio_options[index] for index in audio_select.curselection()]
+        if any(source.kind == "system" for source in sources) and (
+                follow_apps.get() or any(source.kind == "application" for source in sources)):
+            status.set("Choose the system mix or separate applications to avoid duplicating playback audio.")
+            return
+        if follow_apps.get() and last_audio_inventory:
+            sources = list({source.key: source for source in
+                            [*sources, *(item for item in last_audio_inventory if item.kind == "application")]}.values())
+        follow_screens, follow_audio = follow_displays.get(), follow_apps.get()
         status.set("Starting capture…")
-        submit(kind, lambda: Capture(library, selected, rate, codec, record=kind == "record"))
+        submit(kind, lambda: Capture(library, selected, rate, codec, record=kind == "record",
+                                     audio=sources, follow_displays=follow_screens,
+                                     follow_application_audio=follow_audio))
 
     def stop():
         status.set("Finishing capture…")
@@ -152,6 +241,26 @@ def capture_controls(library):
     def save(seconds):
         status.set("Saving replay…")
         submit("save", lambda: capture.save_replay(seconds))
+
+    def handle_hotkey(action):
+        if action == "toggle_record":
+            if capture is None:
+                start("record")
+            elif mode == "record":
+                stop()
+            else:
+                status.set("Stop replay before starting a normal recording.")
+        elif action == "toggle_replay":
+            if capture is None:
+                start("replay")
+            elif mode == "replay":
+                stop()
+            else:
+                status.set("Replay is already active with this recording.")
+        elif capture is not None:
+            save(60 if action == "save_short" else 300)
+        else:
+            status.set("Start replay or recording before saving a replay.")
 
     def open_library():
         try:
@@ -200,6 +309,8 @@ def capture_controls(library):
         for control in (stop_button, short_button, long_button):
             control.configure(state="normal" if active else "disabled")
         export_button.configure(state="disabled" if busy else "normal")
+        for control in (capture_all_displays, capture_all_apps, audio_select, audio_refresh):
+            control.configure(state="normal" if idle else "disabled")
 
     def close():
         nonlocal closing
@@ -211,51 +322,87 @@ def capture_controls(library):
                 stop()
 
     def poll():
-        nonlocal capture, mode, busy, closing, capture_failure
+        nonlocal capture, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
         try:
             action, value, error = results.get_nowait()
         except queue.Empty:
-            if capture is not None and not busy and (failure := capture.failure()):
-                capture_failure = failure
-                status.set(failure)
-                submit("failure", capture.finish_recording if mode == "record" else capture.stop)
+            pass
         else:
             busy = False
             if action in {"record", "replay"} and error is None:
                 capture, mode = value, action
+                next_inventory = next_audio_inventory = 0.0
+                active_display_count = None
                 status.set("Recording · Replay is also active" if mode == "record" else "Replay active")
-            if action in {"stop", "failure"}:
+            if action == "stop":
                 capture, mode = None, None
-            if error:
+            if action == "audio_inventory":
+                if error:
+                    audio_message.set(error)
+                else:
+                    update_audio_inventory(value)
+            elif action == "reconcile":
+                if error:
+                    status.set(error)
+                else:
+                    count, audio_error = value
+                    if audio_error:
+                        audio_message.set(audio_error)
+                    if not count:
+                        warning = capture.warnings[-1] if capture.warnings else "Selected displays are disconnected."
+                        status.set(f"{warning} Waiting for a display.")
+                    elif active_display_count == 0:
+                        status.set("Display capture resumed.")
+                    active_display_count = count
+                    if capture.warnings:
+                        audio_message.set(capture.warnings[-1])
+            elif error:
                 status.set(error)
-                if action in {"stop", "failure"}:
+                if action == "stop":
                     closing = False
             elif isinstance(value, (str, Path)):
                 status.set(f"Saved {value}")
             elif action == "stop":
                 status.set("Capture stopped.")
-            if action == "failure" and capture_failure:
-                status.set(f"{capture_failure}\n{status.get()}" if status.get() != capture_failure else capture_failure)
-                capture_failure = None
             if closing:
                 close()
                 if not busy:
                     return
             update_buttons()
-        root.after(150, poll)
+
+        if hotkeys and not busy and not closing:
+            try:
+                handle_hotkey(hotkeys.events.get_nowait())
+            except queue.Empty:
+                pass
+
+        now = time.monotonic()
+        if capture is not None and not busy and now >= next_inventory:
+            next_inventory = now + 1
+            inspect_audio = (capture.audio or capture.follow_application_audio) and now >= next_audio_inventory
+            if inspect_audio:
+                next_audio_inventory = now + 3
+            session = capture
+            submit("reconcile", lambda: sync_sources(session, inspect_audio))
+        root.after(120, poll)
 
     root.protocol("WM_DELETE_WINDOW", close)
     refresh()
     update_buttons()
     root.after(150, poll)
-    root.mainloop()
+    root.after(200, lambda: refresh_audio() if not busy and capture is None else None)
+    try:
+        root.mainloop()
+    finally:
+        if hotkeys:
+            hotkeys.close()
 
 
 def main():
     if sys.argv[1:2] == ["--file-dialog"]:
         return file_dialog(*sys.argv[2:])
     parser = argparse.ArgumentParser(prog="layer", description="Layer Recorder for Windows")
-    parser.add_argument("command", nargs="?", default="ui", choices=("ui", "editor", "displays", "doctor", "export"))
+    parser.add_argument("command", nargs="?", default="ui", choices=("ui", "editor", "displays", "audio", "doctor", "export"))
     parser.add_argument("project", nargs="?")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--library", type=Path, default=default_library())
@@ -271,6 +418,9 @@ def main():
             if args.project is None or args.output is None:
                 parser.error("export requires a project and --output")
             print(export(args.project, args.output))
+        elif args.command == "audio":
+            from .windows_audio import audio_sources
+            print(json.dumps([asdict(source) for source in audio_sources()], indent=2))
         elif args.command == "displays":
             print(json.dumps([asdict(display) for display in displays()], indent=2))
         else:

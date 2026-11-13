@@ -30,6 +30,36 @@ def stop(process):
         process.kill();process.wait(timeout=2)
 
 
+def windows_audio_worker(path, project, model, directory, options, window, ready, closed, errors):
+    from .windows_audio import play_pcm
+    process = None
+    decoder_done = threading.Event()
+    try:
+        directory.mkdir()
+        args = compile_graph(path.parent, project, model, directory,
+                             {**options, "audio_only": True}, window)
+        args += ["-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2", "-f", "s16le", "pipe:1"]
+        process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=sys.stderr)
+        # Closing video playback also closes this audio stream if the decoder is
+        # blocked opening the file. The native Windows Job owns both processes.
+        def stop_when_closed():
+            while not decoder_done.is_set():
+                if closed.wait(.05):
+                    stop(process)
+                    break
+
+        threading.Thread(target=stop_when_closed, daemon=True).start()
+        with process.stdout:
+            play_pcm(process.stdout, ready, closed)
+        if not closed.is_set() and process.wait():
+            raise RuntimeError("The preview audio decoder failed.")
+    except (OSError, RuntimeError, ValueError) as error:
+        errors.append(error)
+    finally:
+        decoder_done.set()
+        stop(process)
+
+
 def stream(payload, output=None):
     output=output if output is not None else sys.stdout.buffer
     path,project=_load(payload);model=_model(payload,project);validate(model,project)
@@ -45,10 +75,10 @@ def stream(payload, output=None):
     if position>=end:return
     # Accurate effects always use the same graph as export, at playback size.
     needs_audio=payload.get('audio',True) and any(track.get('kind')=='audio' and not track.get('mute') and any(not clip.get('mute') and clip.get('start',0)<end and clip.get('start',0)+clip_duration(clip)>position for clip in track.get('clips',[])) for track in model.get('tracks',[]))
-    audio=needs_audio and os.name != 'nt' and shutil.which('paplay') is not None
-    if needs_audio and not audio:
-        message = 'Preview audio is unavailable on Windows.' if os.name == 'nt' else 'Preview audio unavailable: paplay is not installed.'
-        print(message, file=sys.stderr)
+    windows_audio = needs_audio and os.name == 'nt'
+    audio=needs_audio and not windows_audio and shutil.which('paplay') is not None
+    if needs_audio and not (audio or windows_audio):
+        print('Preview audio unavailable: paplay is not installed.', file=sys.stderr)
     process=player=None;read_fd=write_fd=None;audio_thread=None
     ready=threading.Event();closed=threading.Event();audio_errors=[];player_lock=threading.Lock()
     with tempfile.TemporaryDirectory(prefix='layer-preview-stream-') as directory:
@@ -61,6 +91,14 @@ def stream(payload, output=None):
             read_fd,write_fd=os.pipe()
             args+=['-map','[aout]','-t',number(end-position),'-c:a','pcm_s16le','-ar','48000','-ac','2','-f','s16le',f'pipe:{write_fd}']
         try:
+            if windows_audio:
+                audio_thread = threading.Thread(
+                    target=windows_audio_worker,
+                    args=(path, project, model, Path(directory) / "audio",
+                          {**options, "video_only": False}, (position, end), ready, closed, audio_errors),
+                    daemon=True,
+                )
+                audio_thread.start()
             inherited = {} if write_fd is None else {"pass_fds": (write_fd,)}
             process=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=sys.stderr,**inherited)
             if write_fd is not None:os.close(write_fd);write_fd=None
@@ -107,7 +145,7 @@ def stream(payload, output=None):
             if write_fd is not None:os.close(write_fd)
             if audio_thread:audio_thread.join(timeout=2)
             elif read_fd is not None:os.close(read_fd)
-    if audio_errors:print('Preview audio unavailable; video continued.',file=sys.stderr)
+    if audio_errors:print(f'Preview audio unavailable: {audio_errors[0]}',file=sys.stderr)
 
 
 def main():

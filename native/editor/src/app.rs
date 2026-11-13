@@ -1208,7 +1208,7 @@ impl Studio {
             ui.menu_button("Add media",|ui|{
                 if ui.button("Append recording…").clicked(){operation=Some("append");ui.close();}
                 if ui.button("Overlay media…").clicked(){operation=Some("overlay");ui.close();}
-                if cfg!(unix) && ui.button("Record voiceover…").clicked(){operation=Some("voiceover");ui.close();}
+                if ui.button("Record voiceover…").clicked(){operation=Some("voiceover");ui.close();}
             });
             ui.menu_button("Edit",|ui|{
                 for(label,op)in[("Undo","undo"),("Redo","redo"),("Remove selected","delete")]{if ui.button(label).clicked(){operation=Some(op);ui.close();}}
