@@ -17,7 +17,7 @@ from .studio_model import duration,clip_duration,rate_segments,validate
 
 def number(x):return f'{float(x):.7f}'
 
-def quote(value):return str(value).replace('\\','\\\\').replace("'", "'\\''").replace(':','\\:')
+def quote(value):return (value.as_posix() if os.name == "nt" and isinstance(value, Path) else str(value)).replace('\\','\\\\').replace("'", "'\\''").replace(':','\\:')
 
 
 def curve(item,key,var='t',default=0):
@@ -56,6 +56,22 @@ def graph_file_option():
 
 @functools.lru_cache(maxsize=64)
 def font_file(name):
+    if os.name == "nt":
+        import winreg
+        fonts = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+        key_path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(hive, key_path) as key:
+                    for index in range(winreg.QueryInfoKey(key)[1]):
+                        label, value, _ = winreg.EnumValue(key, index)
+                        if label.split(" (", 1)[0].casefold() == name.casefold() and isinstance(value, str):
+                            path = fonts / value
+                            if path.is_file():
+                                return path
+            except OSError:
+                continue
+        return fonts / "segoeui.ttf"
     return subprocess.check_output(['fc-match','-f','%{file}',name],text=True).strip()
 
 
@@ -309,7 +325,7 @@ def compile_graph(folder,project,model,tmp,options=None,window=None,frame=False)
         from .hardware import render_device
         device=options.get('vaapi_device') or render_device(settings())
         args[1:1]=['-init_hw_device','vaapi=layer:'+device,'-filter_hw_device','layer']
-    script=tmp/'graph.ffscript';script.write_text(';\n'.join(graph));args+=[graph_file_option(),str(script)]
+    script=tmp/'graph.ffscript';script.write_text(';\n'.join(graph), encoding='utf-8');args+=[graph_file_option(),str(script)]
     if not options.get('audio_only'):args+=['-map','[vout]']
     if not frame and not options.get('video_only'):args+=['-map','[aout]']
     args+=['-t',number(span)]

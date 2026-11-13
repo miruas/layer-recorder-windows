@@ -4,11 +4,11 @@
 use crate::model;
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke, Vec2};
 use serde_json::Value;
+use crate::media_process as process;
+use crate::media_process::MediaCommand;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
-    io::Read,
-    os::fd::AsRawFd,
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
     sync::{Arc, Condvar, Mutex, mpsc},
@@ -1030,18 +1030,15 @@ fn decode(key: &Key, state: &Arc<(Mutex<Shared>, Condvar)>) -> Result<Vec<u8>, S
             "rawvideo",
             "pipe:1",
         ])
+        .isolate()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.to_string())?;
     let mut output = child.stdout.take().unwrap();
-    let fd = output.as_raw_fd();
-    let nonblocking = unsafe {
-        let flags = libc::fcntl(fd, libc::F_GETFL);
-        flags >= 0 && libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) >= 0
-    };
-    if !nonblocking {
+    #[cfg(unix)]
+    if !process::nonblocking(&output) {
         let _ = child.kill();
         let _ = child.wait();
         return Err("Could not configure cancellable source decoding".into());
@@ -1059,7 +1056,7 @@ fn decode(key: &Key, state: &Arc<(Mutex<Shared>, Condvar)>) -> Result<Vec<u8>, S
         } {
             break Err("Superseded".into());
         }
-        match output.read(&mut bytes[read..]) {
+        match process::read_ready(&mut output, &mut bytes[read..]) {
             Ok(0) => break Err("No source frame was decoded".into()),
             Ok(n) => {
                 read += n;
@@ -1499,7 +1496,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::NamedTempFile::new().unwrap();
         let link = root.path().join("source.mkv");
+        #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_dir(outside.path(), &link).is_err() { return; }
         let key = Key {
             path: link,
             root: root.path().into(),

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use serde_json::Value;
+#[cfg(all(test, unix))]
+use std::process::Command;
+use crate::media_process as process;
+use crate::media_process::MediaCommand;
 use std::{
     io::{BufRead, BufReader, Write},
-    os::unix::process::CommandExt,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -22,10 +25,13 @@ pub enum Event {
 
 pub struct Control {
     pid: AtomicU32,
+    #[cfg(windows)]
+    job: std::sync::Mutex<Option<process::Job>>,
     cancelled: AtomicBool,
 }
 impl Control {
-    pub(crate) fn standalone()->Arc<Self>{Arc::new(Self{pid:AtomicU32::new(0),cancelled:AtomicBool::new(false)})}
+    pub(crate) fn standalone()->Arc<Self>{Arc::new(Self{pid:AtomicU32::new(0),cancelled:AtomicBool::new(false),#[cfg(windows)] job:Default::default()})}
+    #[cfg(unix)]
     fn kill_group(&self, signal: i32) {
         let pid = self.pid.load(Ordering::SeqCst);
         if pid > 0 {
@@ -35,11 +41,45 @@ impl Control {
         }
     }
     pub(crate) fn cancel_work(self:&Arc<Self>){
-        self.cancelled.store(true,Ordering::SeqCst);self.kill_group(libc::SIGTERM);
-        let control=self.clone();let pid=self.pid.load(Ordering::SeqCst);
-        if pid>0{thread::spawn(move||{for _ in 0..20{thread::sleep(Duration::from_millis(25));if control.pid.load(Ordering::SeqCst)!=pid{return;}}if control.pid.load(Ordering::SeqCst)==pid{control.kill_group(libc::SIGKILL);}});}
+        self.cancelled.store(true, Ordering::SeqCst);
+        #[cfg(unix)]
+        {
+            self.kill_group(libc::SIGTERM);
+            let control = self.clone();
+            let pid = self.pid.load(Ordering::SeqCst);
+            if pid > 0 {
+                thread::spawn(move || {
+                    for _ in 0..20 {
+                        thread::sleep(Duration::from_millis(25));
+                        if control.pid.load(Ordering::SeqCst) != pid { return; }
+                    }
+                    control.kill_group(libc::SIGKILL);
+                });
+            }
+        }
+        #[cfg(windows)]
+        if let Some(job) = self.job.lock().unwrap().as_ref() { job.terminate(); }
     }
-    pub(crate) fn set_pid(&self,pid:u32){self.pid.store(pid,Ordering::SeqCst);}
+
+    pub(crate) fn track(&self, child: &mut Child) -> anyhow::Result<()> {
+        #[cfg(windows)]
+        {
+            let job = process::Job::attach(child).inspect_err(|_| {
+                process::kill(child);
+                let _ = child.wait();
+            })?;
+            *self.job.lock().unwrap() = Some(job);
+        }
+        self.set_pid(child.id());
+        Ok(())
+    }
+
+    pub(crate) fn set_pid(&self, pid: u32) {
+        self.pid.store(pid, Ordering::SeqCst);
+        #[cfg(windows)]
+        if pid == 0 { self.job.lock().unwrap().take(); }
+    }
+
     pub(crate) fn check(&self) -> anyhow::Result<()> {
         if self.cancelled.load(Ordering::SeqCst) {
             anyhow::bail!("Media operation cancelled.");
@@ -56,10 +96,13 @@ struct Process {
 impl Drop for Process {
     fn drop(&mut self) {
         if !matches!(self.child.try_wait(), Ok(Some(_))) {
+            #[cfg(unix)]
             self.control.kill_group(libc::SIGKILL);
+            #[cfg(windows)]
+            self.control.set_pid(0);
             let _ = self.child.wait();
         }
-        self.control.pid.store(0, Ordering::SeqCst);
+        self.control.set_pid(0);
     }
 }
 
@@ -105,10 +148,7 @@ impl Jobs {
         let op = operation.to_owned();
         let root: PathBuf = root.into();
         let tx = self.tx.clone();
-        let control = Arc::new(Control {
-            pid: AtomicU32::new(0),
-            cancelled: AtomicBool::new(false),
-        });
+        let control = Control::standalone();
         self.running.push((id, op.clone(), control.clone()));
         thread::spawn(move || {
             let result = (|| -> anyhow::Result<Value> {
@@ -131,21 +171,21 @@ impl Jobs {
                 if op=="export"&&request["options"]["fast"]==true{
                     return crate::fast_export::run(&request,control.clone(),|value|{let _=tx.send(Event::Progress(id,value));});
                 }
-                let python = std::env::var("LAYER_PYTHON").unwrap_or_else(|_| "python3".into());
+
                 let python_path = std::env::join_paths(std::iter::once(root.clone()).chain(
                     std::env::split_paths(&std::env::var_os("PYTHONPATH").unwrap_or_default()),
                 ))
                 .unwrap_or_else(|_| root.as_os_str().to_os_string());
-                let child = Command::new(python)
+                let mut child = process::python()
                     .args(["-m", "katman.editor_worker"])
                     .env("PYTHONPATH", python_path)
                     .current_dir(&root)
-                    .process_group(0)
+                    .isolate()
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::inherit())
                     .spawn()?;
-                control.pid.store(child.id(), Ordering::SeqCst);
+                control.track(&mut child)?;
                 let mut process = Process {
                     child,
                     control: control.clone(),
@@ -226,8 +266,9 @@ mod tests {
     use std::{fs, time::Instant};
 
     #[test]
+    #[cfg(unix)]
     fn cancellation_escalates_when_process_group_ignores_term(){
-        let control=Control::standalone();let mut child=Command::new("sh").args(["-c","trap '' TERM; echo ready; sleep 60"]).process_group(0).stdout(Stdio::piped()).spawn().unwrap();
+        let control=Control::standalone();let mut child=Command::new("sh").args(["-c","trap '' TERM; echo ready; sleep 60"]).isolate().stdout(Stdio::piped()).spawn().unwrap();
         let mut ready=String::new();BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready).unwrap();assert_eq!(ready.trim(),"ready");control.set_pid(child.id());
         let started=Instant::now();control.cancel_work();let (tx,rx)=mpsc::channel();let owner=control.clone();thread::spawn(move||{let mut process=Process{child,control:owner};let status=process.child.wait();let _=tx.send(status);});
         let result=rx.recv_timeout(Duration::from_secs(2));if result.is_err(){control.kill_group(libc::SIGKILL);}assert!(result.unwrap().unwrap().success()==false);assert!(started.elapsed()>=Duration::from_millis(400));assert!(started.elapsed()<Duration::from_secs(2));

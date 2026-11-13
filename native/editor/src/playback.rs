@@ -2,9 +2,10 @@
 //! Source-rate playback with bounded latest-frame delivery and repaint notification.
 use anyhow::{Context, Result, bail};
 use eframe::egui;
+use crate::media_process as process;
+use crate::media_process::MediaCommand;
 use std::{
     io::{BufRead, BufReader, Read, Write},
-    os::unix::process::CommandExt,
     path::Path,
     process::{Child, Command, Stdio},
     sync::{
@@ -44,6 +45,8 @@ pub struct Playback {
     video: Option<Child>,
     audio: Option<Child>,
     sink: Option<Child>,
+    #[cfg(windows)]
+    _job: Option<process::Job>,
 }
 fn preview_size(canvas: [u32; 2], bounds: [u32; 2]) -> (usize, usize) {
     let w = canvas[0].max(2) as f64;
@@ -117,20 +120,25 @@ impl Playback {
     ) -> Result<Self> {
         let fps = frame_rate(fps)?;
         let (width, height) = preview_size(canvas, bounds);
-        let python = std::env::var("LAYER_PYTHON").unwrap_or_else(|_| "python3".into());
+
         let python_path = std::env::join_paths(std::iter::once(root.to_path_buf()).chain(
             std::env::split_paths(&std::env::var_os("PYTHONPATH").unwrap_or_default()),
         ))?;
-        let mut child = Command::new(python)
+        let mut child = process::python()
             .args(["-m", "katman.preview_stream"])
             .current_dir(root)
             .env("PYTHONPATH", python_path)
-            .process_group(0)
+            .isolate()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .context("Start timeline playback")?;
+        #[cfg(windows)]
+        let job = process::Job::attach(&child).inspect_err(|_| {
+            process::kill(&mut child);
+            let _ = child.wait();
+        })?;
         let mut input = child.stdin.take().unwrap();
         let stderr = child.stderr.take().unwrap();
         let (diagnostic_tx, diagnostics) = mpsc::sync_channel(8);
@@ -174,6 +182,8 @@ impl Playback {
             video: Some(child),
             audio: None,
             sink: None,
+            #[cfg(windows)]
+            _job: Some(job),
         })
     }
     /// Compatibility reader for an already rendered preview. Keep its source
@@ -239,7 +249,7 @@ impl Playback {
                 "rawvideo",
                 "pipe:1",
             ])
-            .process_group(0)
+            .isolate()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -257,8 +267,11 @@ impl Playback {
                 output, width, height, fps, offset, flag, ended, pending, repaint,
             )
         });
+        #[allow(unused_mut)]
         let mut audio = None;
+        #[allow(unused_mut)]
         let mut sink = None;
+        #[cfg(unix)]
         if let Ok(mut decoder) = Command::new("ffmpeg")
             .args([
                 "-v",
@@ -276,7 +289,7 @@ impl Playback {
                 "2",
                 "pipe:1",
             ])
-            .process_group(0)
+            .isolate()
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -292,7 +305,7 @@ impl Playback {
                     "--client-name=Layer",
                     "--stream-name=Preview",
                 ])
-                .process_group(0)
+                .isolate()
                 .stdin(Stdio::from(pipe))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -319,6 +332,8 @@ impl Playback {
             video: Some(video),
             audio,
             sink,
+            #[cfg(windows)]
+            _job: None,
         })
     }
 }
@@ -330,10 +345,7 @@ impl Drop for Playback {
             .flatten()
             .collect();
         for child in &mut children {
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            let _ = child.kill();
+            process::kill(child);
         }
         thread::spawn(move || {
             for mut child in children {

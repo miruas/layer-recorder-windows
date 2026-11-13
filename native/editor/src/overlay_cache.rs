@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Independent title/caption sprites, with bounded memory and priority for the
 //! visible scene. Upcoming captions are optional, cancellable prefetch work.
+#[cfg(unix)]
+use std::io::Write;
 use eframe::egui;
 use serde_json::{Value, json};
+use crate::media_process as process;
+use crate::media_process::MediaCommand;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    io::{Read, Write},
-    os::{fd::AsRawFd, unix::process::CommandExt},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::{Arc, Condvar, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
@@ -408,9 +410,7 @@ impl Drop for Cache {
 struct Process(Child);
 impl Drop for Process {
     fn drop(&mut self) {
-        unsafe {
-            libc::kill(-(self.0.id() as i32), libc::SIGKILL);
-        }
+        process::kill(&mut self.0);
         let _ = self.0.wait();
     }
 }
@@ -419,12 +419,6 @@ fn cancelled(state: &State, key: &Key) -> bool {
     s.stop
         || !s.wanted.contains(key)
         || (!s.required.contains(key) && s.queue.iter().any(|k| s.required.contains(k)))
-}
-fn nonblocking(fd: i32) -> bool {
-    unsafe {
-        let flags = libc::fcntl(fd, libc::F_GETFL);
-        flags >= 0 && libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) >= 0
-    }
 }
 /// Validate cropped headers before allocating their payload. The worker cannot
 /// place pixels outside the requested canvas or grow a declared allocation.
@@ -451,25 +445,37 @@ fn rasterize_image(root: &Path, key: &Key, state: &State) -> Result<Raster, Stri
     if cancelled(state, key) {
         return Err(SUPERSEDED.into());
     }
-    let python = std::env::var("LAYER_PYTHON").unwrap_or_else(|_| "python3".into());
-    let child = Command::new(python)
+
+    let request = key.request();
+    #[cfg(windows)]
+    let input = {
+        use std::io::{Seek, Write};
+        let mut file = tempfile::tempfile().map_err(|e| e.to_string())?;
+        file.write_all(&request).and_then(|_| file.rewind()).map_err(|e| e.to_string())?;
+        Stdio::from(file)
+    };
+    #[cfg(unix)]
+    let input = Stdio::piped();
+    let child = process::python()
         .args(["-m", key.module()])
         .current_dir(root)
-        .stdin(Stdio::piped())
+        .stdin(input)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .process_group(0)
+        .isolate()
         .spawn()
         .map_err(|e| e.to_string())?;
     let mut process = Process(child);
+    #[cfg(unix)]
     let mut input = process.0.stdin.take();
     let mut output = process.0.stdout.take().ok_or("Missing overlay output")?;
-    if !nonblocking(output.as_raw_fd())
-        || !input.as_ref().is_some_and(|i| nonblocking(i.as_raw_fd()))
+    #[cfg(unix)]
+    if !process::nonblocking(&output)
+        || !input.as_ref().is_some_and(process::nonblocking)
     {
         return Err("Could not configure cancellable overlay rasterization".into());
     }
-    let request = key.request();
+    #[cfg(unix)]
     let mut written = 0;
     let mut data = Vec::new();
     let mut header = None;
@@ -487,6 +493,7 @@ fn rasterize_image(root: &Path, key: &Key, state: &State) -> Result<Raster, Stri
         if started.elapsed() > Duration::from_secs(10) {
             return Err("Text overlay rasterization timed out".into());
         }
+        #[cfg(unix)]
         if let Some(stdin) = input.as_mut() {
             match stdin.write(&request[written..]) {
                 Ok(0) => return Err("Overlay closed its input".into()),
@@ -505,7 +512,7 @@ fn rasterize_image(root: &Path, key: &Key, state: &State) -> Result<Raster, Stri
             }
         }
         let count = expected.map_or(buffer.len(), |n| (n - data.len()).min(buffer.len()));
-        match output.read(&mut buffer[..count]) {
+        match process::read_ready(&mut output, &mut buffer[..count]) {
             Ok(0) => return Err("Overlay returned an incomplete sprite".into()),
             Ok(n) => {
                 data.extend_from_slice(&buffer[..n]);

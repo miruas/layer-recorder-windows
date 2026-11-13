@@ -335,6 +335,7 @@ fn worker(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[cfg(unix)]
     use std::{ffi::CString, os::unix::fs::OpenOptionsExt};
 
     fn read(path: &Path) -> Value {
@@ -516,6 +517,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn blocked_fifo_stress_retains_only_one_latest_model_per_path() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("project.katman");
@@ -594,6 +596,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn blocked_fifo_read_does_not_block_submit_and_flush_persists_latest_state() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("project.katman");

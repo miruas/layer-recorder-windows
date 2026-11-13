@@ -30,10 +30,22 @@ Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` dire
 .\.venv\Scripts\layer.exe export 'C:\Clips\My project\project.katman' --output 'C:\Clips\My video.mp4'
 ```
 
+## Native timeline editor
+
+Install stable Rust and a Windows linker. For the default MSVC toolchain, install Visual Studio Build Tools with **Desktop development with C++**. From the checkout:
+
+```powershell
+.\tools\build-windows.ps1
+.\.venv\Scripts\layer.exe editor
+.\.venv\Scripts\layer.exe editor 'C:\Clips\My project\project.katman'
+```
+
+The capture window also has an **Open editor** button. Studio uses the same project files and library as the recorder. The file picker accepts existing projects, including recordings made on Linux when the source media is present. Studio plays timeline video and preserves audio tracks in MP4 exports. Audible timeline playback and voiceover capture are pending on Windows.
+
 ## Preview scope
 
 - Screen capture uses FFmpeg's Windows GDI input. Software H.264 is the default. NVENC, AMF and Quick Sync are selectable when the FFmpeg build and driver support them. `doctor` lists compiled encoders. Actual encoder availability is determined when capture starts.
-- The controls and MP4 export run on Windows. The native timeline editor, application/system audio and microphone capture, global shortcuts, and live display hotplug are pending. Keep the display layout fixed during capture.
+- The controls, Studio and MP4 export run on Windows. Application/system audio and microphone capture, global shortcuts, and live display hotplug are pending. Keep the display layout fixed during capture.
 - One physical 1920×1080 display was tested with software H.264 and NVIDIA NVENC. The Windows regression test exercises independent video sources, replay trimming, and MP4 export with two synthetic displays. Physical multi-monitor, mixed-DPI, AMD and Intel coverage is pending. Separate producers have approximate startup alignment.
 - Linux build and feature documentation lives in the [upstream README](https://github.com/miruas/layer-recorder#readme).
 

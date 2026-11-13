@@ -1,4 +1,4 @@
-name: Windows capture
+name: Windows capture and editor
 on:
   push:
   pull_request:
@@ -32,3 +32,7 @@ jobs:
           ffprobe -version
       - name: Test capture pipeline and project export
         run: python -m unittest discover -s tests -p test_windows_capture.py -v
+      - name: Test native Studio
+        run: |
+          $env:LAYER_PYTHON = (Get-Command python).Source
+          cargo test --locked --manifest-path native/editor/Cargo.toml

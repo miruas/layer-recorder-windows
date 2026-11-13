@@ -1,20 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-only
 use anyhow::{bail,Context,Result};
 use serde_json::{Value,json};
-use std::{fs,io::{BufRead,BufReader,Write},os::{fd::AsRawFd,unix::{fs::{PermissionsExt,OpenOptionsExt},net::{UnixListener,UnixStream}}},path::{Path,PathBuf},process::{Command,Stdio},sync::mpsc,time::Duration,thread};
+use std::{fs, io::Write, path::{Path, PathBuf}, sync::mpsc};
+#[cfg(unix)]
+use std::{io::{BufRead,BufReader},os::{fd::AsRawFd,unix::{fs::{PermissionsExt,OpenOptionsExt},net::{UnixListener,UnixStream}}},process::{Command,Stdio},time::Duration,thread};
+#[cfg(unix)]
 pub fn runtime()->PathBuf{PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_|format!("/tmp/katman-{}",unsafe{libc::getuid()}))).join("katman")}
+#[cfg(unix)]
 pub fn cache()->PathBuf{PathBuf::from(std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_|format!("{}/.cache",std::env::var("HOME").unwrap_or_default()))).join("katman")}
+#[cfg(unix)]
 pub fn settings_path()->PathBuf{std::env::var("LAYER_CONFIG").map(PathBuf::from).unwrap_or_else(|_|PathBuf::from(std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_|format!("{}/.config",std::env::var("HOME").unwrap_or_default()))).join("katman/settings.json"))}
+#[cfg(windows)]
+pub fn cache() -> PathBuf {
+    std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        .unwrap_or_else(|| home().join("AppData/Local")).join("Layer")
+}
+#[cfg(windows)]
+pub fn settings_path() -> PathBuf {
+    std::env::var_os("LAYER_CONFIG").map(PathBuf::from).unwrap_or_else(|| {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+            .unwrap_or_else(|| home().join("AppData/Roaming")).join("Layer/settings.json")
+    })
+}
+fn home() -> PathBuf {
+    PathBuf::from(std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default())
+}
 pub fn settings()->Result<Value>{
  let path=settings_path();let mut cfg=if path.is_file(){serde_json::from_slice(&fs::read(path)?)?}else{json!({})};
  if cfg["library"].is_null(){cfg["library"]=json!("~/Videos/Layer");}
  for(k,v)in[("buffer",300),("replay_short",60),("replay_long",300)]{if cfg[k].is_null(){cfg[k]=json!(v);}}Ok(cfg)
 }
+#[cfg(unix)]
 pub fn resolved_settings(root:&Path)->Result<Value>{
  let python=std::env::var("LAYER_PYTHON").unwrap_or_else(|_|"python3".into());
  let out=Command::new(python).args(["-c","import json; from katman.common import settings; print(json.dumps(settings()))"]).env("PYTHONPATH",root).current_dir(root).output()?;
  if !out.status.success(){bail!("{}",String::from_utf8_lossy(&out.stderr).trim());}Ok(serde_json::from_slice(&out.stdout)?)
 }
+#[cfg(windows)]
+pub fn resolved_settings(_root: &Path) -> Result<Value> { settings() }
 static SETTINGS_WRITES:std::sync::Mutex<()>=std::sync::Mutex::new(());
 pub fn save_capture_advanced(value:&Value)->Result<()> {
  let _guard=SETTINGS_WRITES.lock().map_err(|_|anyhow::anyhow!("Settings save lock is unavailable."))?;
@@ -53,11 +76,14 @@ fn save_preview_preferences_at(file:&Path,preferences:crate::preview_settings::P
  let mut tmp=tempfile::NamedTempFile::new_in(parent).context("Create temporary Layer settings")?;
  serde_json::to_writer_pretty(&mut tmp,&raw)?;tmp.write_all(b"\n")?;
  tmp.flush()?;tmp.as_file().sync_all()?;tmp.persist(file).context("Replace Layer settings")?;
+ #[cfg(unix)]
  fs::File::open(parent)?.sync_all()?;
  Ok(())
 }
-pub fn expand(path:&str)->PathBuf{if path=="~"||path.starts_with("~/"){PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(path.trim_start_matches('~').trim_start_matches('/'))}else{PathBuf::from(path)}}
+pub fn expand(path:&str)->PathBuf{if path=="~"||path.starts_with("~/"){home().join(path.trim_start_matches('~').trim_start_matches('/'))}else{PathBuf::from(path)}}
+#[cfg(unix)]
 pub fn request(message:Value)->Result<Value>{let mut s=UnixStream::connect(runtime().join("control.sock"))?;s.set_read_timeout(Some(Duration::from_secs(180)))?;serde_json::to_writer(&mut s,&message)?;s.write_all(b"\n")?;s.flush()?;let mut line=String::new();BufReader::new(s).read_line(&mut line)?;let reply:Value=serde_json::from_str(&line)?;if reply["ok"]!=true{bail!("{}",reply["error"].as_str().unwrap_or("Capture operation failed"));}Ok(reply["data"].clone())}
+#[cfg(unix)]
 pub fn ensure_core(root:&Path)->Result<()>{if request(json!({"action":"status"})).is_ok(){return Ok(());}let binary=root.join("bin/layer-recorderd");if !binary.is_file(){bail!("The capture core is missing. Install the complete Layer package or build the recorder component.");}let cache=cache();fs::create_dir_all(&cache)?;let log=fs::OpenOptions::new().create(true).append(true).open(cache.join("service.log"))?;Command::new(binary).args(["--root",&root.to_string_lossy()]).env("LAYER_PYTHON",std::env::var("LAYER_PYTHON").unwrap_or_else(|_|"python3".into())).stdin(Stdio::null()).stdout(log.try_clone()?).stderr(log).spawn()?;for _ in 0..100{thread::sleep(Duration::from_millis(50));if request(json!({"action":"status"})).is_ok(){return Ok(());}}bail!("The capture core did not start. Check service.log.")}
 /// Canonical GSR control actions exposed to the editor. Keeping this list here
 /// prevents the UI from inventing capture commands or falling back to Layer-only
@@ -75,6 +101,7 @@ const GSR_ACTIONS:&[&str]=&[
 ///
 /// This never uses a shell, never reads GSR's configuration, and never turns a
 /// successful socket write into a claim that media was saved or a stream started.
+#[cfg(unix)]
 pub fn gsr_action(root:&Path,action:&str)->Result<Value>{
  if !GSR_ACTIONS.contains(&action){bail!("Unsupported GPU Screen Recorder action.");}
  let python=std::env::var("LAYER_PYTHON").unwrap_or_else(|_|"python3".into());
@@ -96,11 +123,26 @@ pub fn gsr_action(root:&Path,action:&str)->Result<Value>{
  Ok(serde_json::from_str(stdout).unwrap_or_else(|_|json!({"message":stdout})))
 }
 pub fn open_gsr(root:&Path)->Result<()>{gsr_action(root,"show-recording-settings").map(|_|())}
-pub struct Instance{_lock:fs::File,pub incoming:mpsc::Receiver<Option<PathBuf>>}
+pub struct Instance{#[cfg(unix)] _lock:fs::File,pub incoming:mpsc::Receiver<Option<PathBuf>>}
+#[cfg(unix)]
 pub fn instance(open:Option<PathBuf>)->Result<Option<Instance>>{
  let dir=runtime();fs::create_dir_all(&dir)?;fs::set_permissions(&dir,fs::Permissions::from_mode(0o700))?;let socket=dir.join("studio.sock");let lock=fs::OpenOptions::new().create(true).read(true).write(true).truncate(false).custom_flags(libc::O_NOFOLLOW).open(dir.join("studio.lock"))?;
  if unsafe{libc::flock(lock.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)}!=0{let mut s=UnixStream::connect(&socket).context("Existing Layer window is starting; try again shortly")?;serde_json::to_writer(&mut s,&json!({"open":open}))?;s.write_all(b"\n")?;return Ok(None);}
  if socket.exists(){fs::remove_file(&socket)?;}let listener=UnixListener::bind(&socket)?;fs::set_permissions(&socket,fs::Permissions::from_mode(0o600))?;let(tx,rx)=mpsc::channel();thread::spawn(move||{for s in listener.incoming(){let Ok(s)=s else{break;};let _=s.set_read_timeout(Some(Duration::from_secs(2)));let mut line=String::new();if BufReader::new(s).read_line(&mut line).is_ok(){if let Ok(v)=serde_json::from_str::<Value>(&line){let _=tx.send(v["open"].as_str().map(PathBuf::from));}}}});Ok(Some(Instance{_lock:lock,incoming:rx}))
+}
+#[cfg(windows)]
+pub fn request(_message: Value) -> Result<Value> { bail!("Use the Windows capture controls.") }
+#[cfg(windows)]
+pub fn ensure_core(_root: &Path) -> Result<()> { bail!("Use the Windows capture controls.") }
+#[cfg(windows)]
+pub fn gsr_action(_root: &Path, action: &str) -> Result<Value> {
+    if !GSR_ACTIONS.contains(&action) { bail!("Unsupported GPU Screen Recorder action."); }
+    bail!("Use the Windows capture controls.")
+}
+#[cfg(windows)]
+pub fn instance(_open: Option<PathBuf>) -> Result<Option<Instance>> {
+    let (_, incoming) = mpsc::channel();
+    Ok(Some(Instance { incoming }))
 }
 #[cfg(test)]
 mod tests{

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //! Best-effort source-rate discovery. Run only on the document-loading worker.
 use serde_json::Value;
+use crate::media_process as process;
+use crate::media_process::MediaCommand;
 use std::{
     collections::HashMap,
     fs,
-    io::{self, Read},
-    os::{fd::AsRawFd, unix::process::CommandExt},
+    io,
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -162,16 +163,13 @@ fn safe_source(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 fn stop(child: &mut Child) {
     // ffprobe normally has no children; the group also bounds a stuck wrapper.
-    unsafe {
-        libc::kill(-(child.id() as i32), libc::SIGKILL);
-    }
-    let _ = child.kill();
+    process::kill(child);
     let _ = child.wait();
 }
-fn drain(output: &mut impl Read, bytes: &mut Vec<u8>) -> Result<(), String> {
+fn drain(output: &mut std::process::ChildStdout, bytes: &mut Vec<u8>) -> Result<(), String> {
     let mut block = [0; 4096];
     loop {
-        match output.read(&mut block) {
+        match process::read_ready(output, &mut block) {
             Ok(0) => return Ok(()),
             Ok(count) => {
                 if bytes.len() + count > OUTPUT_LIMIT {
@@ -202,14 +200,12 @@ fn probe(program: &Path, path: &Path, budget: Duration) -> Result<Rates, String>
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .process_group(0)
+        .isolate()
         .spawn()
         .map_err(|_| "Could not start source frame-rate probe.".to_string())?;
     let mut output = child.stdout.take().unwrap();
-    let flags = unsafe { libc::fcntl(output.as_raw_fd(), libc::F_GETFL) };
-    if flags < 0
-        || unsafe { libc::fcntl(output.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
-    {
+    #[cfg(unix)]
+    if !process::nonblocking(&output) {
         stop(&mut child);
         return Err("Could not bound source frame-rate probe output.".into());
     }
@@ -223,9 +219,8 @@ fn probe(program: &Path, path: &Path, budget: Duration) -> Result<Rates, String>
             Ok(Some(status)) => {
                 // Drain available bytes without waiting on inherited pipe FDs.
                 let result = drain(&mut output, &mut bytes);
-                unsafe {
-                    libc::kill(-(child.id() as i32), libc::SIGKILL);
-                }
+                #[cfg(unix)]
+                process::kill_group(child.id(), libc::SIGKILL);
                 result?;
                 if !status.success() {
                     return Err("Source frame-rate probe could not read the video.".into());
@@ -267,7 +262,7 @@ fn probe(program: &Path, path: &Path, budget: Duration) -> Result<Rates, String>
     Ok(rates)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use serde_json::json;

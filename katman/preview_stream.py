@@ -45,8 +45,10 @@ def stream(payload, output=None):
     if position>=end:return
     # Accurate effects always use the same graph as export, at playback size.
     needs_audio=payload.get('audio',True) and any(track.get('kind')=='audio' and not track.get('mute') and any(not clip.get('mute') and clip.get('start',0)<end and clip.get('start',0)+clip_duration(clip)>position for clip in track.get('clips',[])) for track in model.get('tracks',[]))
-    audio=needs_audio and shutil.which('paplay') is not None
-    if needs_audio and not audio:print('Preview audio unavailable: paplay is not installed.',file=sys.stderr)
+    audio=needs_audio and os.name != 'nt' and shutil.which('paplay') is not None
+    if needs_audio and not audio:
+        message = 'Preview audio is unavailable on Windows.' if os.name == 'nt' else 'Preview audio unavailable: paplay is not installed.'
+        print(message, file=sys.stderr)
     process=player=None;read_fd=write_fd=None;audio_thread=None
     ready=threading.Event();closed=threading.Event();audio_errors=[];player_lock=threading.Lock()
     with tempfile.TemporaryDirectory(prefix='layer-preview-stream-') as directory:
@@ -59,7 +61,8 @@ def stream(payload, output=None):
             read_fd,write_fd=os.pipe()
             args+=['-map','[aout]','-t',number(end-position),'-c:a','pcm_s16le','-ar','48000','-ac','2','-f','s16le',f'pipe:{write_fd}']
         try:
-            process=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=sys.stderr,pass_fds=(() if write_fd is None else (write_fd,)),start_new_session=False)
+            inherited = {} if write_fd is None else {"pass_fds": (write_fd,)}
+            process=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=sys.stderr,**inherited)
             if write_fd is not None:os.close(write_fd);write_fd=None
             if audio:
                 def play_audio():

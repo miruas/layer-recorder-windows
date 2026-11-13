@@ -11,18 +11,65 @@ import subprocess
 import sys
 import threading
 
+from .common import APP, SETTINGS_FILE
 from .windows_capture import Capture, displays
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
 
 
 def default_library():
+    try:
+        configured = json.loads(SETTINGS_FILE.read_text(encoding="utf-8")).get("library")
+        if isinstance(configured, str) and configured.strip():
+            return Path(configured).expanduser()
+    except (OSError, ValueError, AttributeError):
+        pass
     return Path.home() / "Videos" / "Layer"
 
 
 def export(path, output):
     from .export import export_project
     return export_project(path, output)
+
+
+def editor_command(project=None, library=None):
+    editor = APP / "bin/layer-studio.exe"
+    if not editor.is_file():
+        raise RuntimeError("Layer Studio is missing. Build it with tools/build-windows.ps1.")
+    command = [str(editor), "--root", str(APP)]
+    if project is not None:
+        command.extend(("--project", str(Path(project).expanduser().resolve())))
+    if library is not None:
+        command.extend(("--library", str(library)))
+    return command
+
+
+def file_dialog(mode, kind):
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    try:
+        extensions = {"open": ("Layer project", "*.katman"), "export": ("Video", "*.mp4"),
+                      "import_srt": ("SubRip subtitles", "*.srt"),
+                      "export_srt": ("SubRip subtitles", "*.srt"), "frame": ("PNG image", "*.png"),
+                      "lut": ("LUT", "*.cube")}
+        if mode == "directory":
+            path = filedialog.askdirectory(parent=root)
+        else:
+            options = {"parent": root}
+            if kind in extensions:
+                options["filetypes"] = [extensions[kind], ("All files", "*")]
+            if mode == "save":
+                options["defaultextension"] = extensions.get(kind, ("", ""))[1][1:]
+                path = filedialog.asksaveasfilename(**options)
+            else:
+                path = filedialog.askopenfilename(**options)
+        print(json.dumps(path or None))
+    finally:
+        root.destroy()
 
 
 def capture_controls(library):
@@ -113,6 +160,13 @@ def capture_controls(library):
         except OSError as error:
             status.set(str(error))
 
+    def open_editor():
+        try:
+            command = editor_command(library=library)
+            subprocess.Popen(command, env={**os.environ, "LAYER_PYTHON": sys.executable})
+        except (OSError, RuntimeError) as error:
+            status.set(str(error))
+
     def export_dialog():
         path = filedialog.askopenfilename(initialdir=library, filetypes=[("Layer project", "*.katman")])
         if not path:
@@ -133,6 +187,7 @@ def capture_controls(library):
     for column, control in enumerate((short_button, long_button, export_button)):
         control.grid(row=6, column=column, sticky="ew", padx=2, pady=2)
     ttk.Button(panel, text="Open recordings", command=open_library).grid(row=7, column=0, sticky="w", pady=8)
+    ttk.Button(panel, text="Open editor", command=open_editor).grid(row=7, column=1, sticky="w", pady=8)
     ttk.Label(panel, textvariable=status, wraplength=430).grid(row=8, column=0, columnspan=3, sticky="w")
 
     def update_buttons():
@@ -197,8 +252,10 @@ def capture_controls(library):
 
 
 def main():
+    if sys.argv[1:2] == ["--file-dialog"]:
+        return file_dialog(*sys.argv[2:])
     parser = argparse.ArgumentParser(prog="layer", description="Layer Recorder for Windows")
-    parser.add_argument("command", nargs="?", default="ui", choices=("ui", "displays", "doctor", "export"))
+    parser.add_argument("command", nargs="?", default="ui", choices=("ui", "editor", "displays", "doctor", "export"))
     parser.add_argument("project", nargs="?")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--library", type=Path, default=default_library())
@@ -206,6 +263,10 @@ def main():
     try:
         if args.command == "ui":
             capture_controls(args.library.expanduser().resolve())
+        elif args.command == "editor":
+            result = subprocess.run(editor_command(args.project, args.library.expanduser().resolve()),
+                                    env={**os.environ, "LAYER_PYTHON": sys.executable})
+            raise SystemExit(result.returncode)
         elif args.command == "export":
             if args.project is None or args.output is None:
                 parser.error("export requires a project and --output")
@@ -232,3 +293,7 @@ def main():
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(error, file=sys.stderr)
         raise SystemExit(1) from error
+
+
+if __name__ == "__main__":
+    main()

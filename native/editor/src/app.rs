@@ -12,11 +12,12 @@ use crate::{
 use anyhow::{Context, Result};
 use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use serde_json::{Value, json};
+#[cfg(unix)]
+use std::process::Command;
 use std::{
     collections::{HashSet,BTreeMap},
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -210,18 +211,24 @@ impl Studio {
             .text_styles
             .insert(egui::TextStyle::Body, egui::FontId::proportional(14.));
         cc.egui_ctx.set_style(style);
-        let (cfg, error) = match ipc::settings() {
+        let (mut cfg, error) = match ipc::settings() {
             Ok(v) => (v, String::new()),
             Err(e) => (
                 json!({"library":"~/Videos/Layer","replay_short":60,"replay_long":300}),
                 format!("Could not read recording preferences: {e}"),
             ),
         };
+        if let Some(library) = std::env::args().collect::<Vec<_>>().windows(2)
+            .find(|args| args[0] == "--library").map(|args| &args[1]) {
+            cfg["library"] = json!(library);
+        }
         let library_edit = cfg["library"].as_str().unwrap_or("~/Videos/Layer").into();
         let (tx, rx) = mpsc::channel();
         // Fontconfig can rebuild its cache or access slow mounted font folders.
         // Start with bundled fonts so that this cannot block the first frame.
+        #[cfg(unix)]
         let font_tx = tx.clone();
+        #[cfg(unix)]
         thread::spawn(move || {
             if let Ok(out) = Command::new("fc-match").args(["-f", "%{file}", "Noto Sans"]).output() {
                 if out.status.success() {
@@ -528,31 +535,50 @@ impl Studio {
     }
     fn choose(&self, kind: &str, save: bool) {
         let kind = kind.to_string();
+        #[cfg(windows)]
+        let root = self.root.clone();
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let mut command = Command::new("zenity");
-            command
-                .arg("--file-selection")
-                .args(["--title", if save { "Save file" } else { "Open media" }]);
-            if kind=="batch_export" {command.arg("--directory");}
-            else if save {
-                command.args(["--save", "--confirm-overwrite"]);
-            }
-            let result = command.output().or_else(|_| {
-                let mut c = Command::new("kdialog");
-                c.arg(if kind=="batch_export" { "--getexistingdirectory" } else if save {
-                    "--getsavefilename"
-                } else {
-                    "--getopenfilename"
+            #[cfg(windows)]
+            let file = {
+                use crate::media_process::MediaCommand;
+                crate::media_process::python()
+                    .args(["-m", "katman.windows_app", "--file-dialog",
+                        if kind == "batch_export" { "directory" } else if save { "save" } else { "open" },
+                        &kind])
+                    .current_dir(&root)
+                    .isolate()
+                    .output()
+                    .ok()
+                    .filter(|output| output.status.success())
+                    .and_then(|output| serde_json::from_slice::<Option<PathBuf>>(&output.stdout).ok().flatten())
+            };
+            #[cfg(unix)]
+            let file = {
+                let mut command = Command::new("zenity");
+                command
+                    .arg("--file-selection")
+                    .args(["--title", if save { "Save file" } else { "Open media" }]);
+                if kind=="batch_export" {command.arg("--directory");}
+                else if save {
+                    command.args(["--save", "--confirm-overwrite"]);
+                }
+                let result = command.output().or_else(|_| {
+                    let mut c = Command::new("kdialog");
+                    c.arg(if kind=="batch_export" { "--getexistingdirectory" } else if save {
+                        "--getsavefilename"
+                    } else {
+                        "--getopenfilename"
+                    });
+                    c.output()
                 });
-                c.output()
-            });
-            let file = result
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| PathBuf::from(s.trim()))
-                .filter(|p| !p.as_os_str().is_empty());
+                result
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .and_then(|o| String::from_utf8(o.stdout).ok())
+                    .map(|s| PathBuf::from(s.trim()))
+                    .filter(|p| !p.as_os_str().is_empty())
+            };
             let _ = tx.send(Message::File(kind, file));
         });
     }
@@ -1031,25 +1057,28 @@ impl Studio {
         {
             self.queue_frame();
         }
-        if self.last_settings_poll.elapsed() > Duration::from_secs(5) && !self.settings_polling { self.refresh_settings(); }
+        if cfg!(unix) && self.last_settings_poll.elapsed() > Duration::from_secs(5) && !self.settings_polling { self.refresh_settings(); }
+        #[cfg(unix)]
         if self.last_gsr_poll.elapsed() > Duration::from_secs(10) && !self.gsr_polling { self.poll_gsr(); }
         if self.library_refresh_due.is_some_and(|due| Instant::now() >= due) {
             self.library_refresh_due = None;
             self.scan();
             self.last_poll = Instant::now() - Duration::from_secs(2);
         }
+        #[cfg(unix)]
         if self.last_poll.elapsed() > Duration::from_millis(800) && !self.polling {
             self.capture("status", None);
             self.last_poll = Instant::now();
         }
     }
     fn toolbar(&mut self, ctx: &egui::Context) {
-        let compact=ctx.viewport_rect().width()<1000.;let state=CaptureState::from_status(&self.status);let mut action=None;
+        let compact=ctx.viewport_rect().width()<1000.;let state=CaptureState::from_status(&self.status);#[allow(unused_mut)] let mut action=None;
         egui::TopBottomPanel::top("recording").exact_height(52.).show(ctx,|ui|{
             ui.add_space(6.);ui.horizontal(|ui|{
                 ui.add_space(8.);ui.label(RichText::new(if compact {"Layer"}else{"Layer editor"}).size(18.).strong());ui.add_space(12.);
                 if ui.selectable_label(self.library_open||self.document.is_none(),"Recordings").on_hover_text("Browse your recordings").clicked(){self.library_open=!self.library_open;}
                 ui.separator();
+                #[cfg(unix)]
                 ui.add_enabled_ui(!self.gsr_busy,|ui|{
                     ui.menu_button("Record & replay",|ui|{
                         ui.set_min_width(230.);
@@ -1057,10 +1086,12 @@ impl Studio {
                     });
                     if let Some(chosen)=gsr_controls::capture_menu(ui){action=Some(chosen);}
                 });
+                #[cfg(windows)]
+                if ui.button("Open project…").clicked() { self.choose("open", false); }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{
                     if ui.button("Preferences").clicked(){self.settings_open=!self.settings_open;}
                     if self.document.is_some()&&ui.selectable_label(self.properties_open,"Properties").on_hover_text("Clip timing, picture, audio and effects").clicked(){self.properties_open=!self.properties_open;}
-                    if !compact{ui.label(RichText::new(state.summary(true)).small().color(state.tone(ui)));}
+                    if cfg!(unix) && !compact{ui.label(RichText::new(state.summary(true)).small().color(state.tone(ui)));}
                 });
             });
         });
@@ -1177,7 +1208,7 @@ impl Studio {
             ui.menu_button("Add media",|ui|{
                 if ui.button("Append recording…").clicked(){operation=Some("append");ui.close();}
                 if ui.button("Overlay media…").clicked(){operation=Some("overlay");ui.close();}
-                if ui.button("Record voiceover…").clicked(){operation=Some("voiceover");ui.close();}
+                if cfg!(unix) && ui.button("Record voiceover…").clicked(){operation=Some("voiceover");ui.close();}
             });
             ui.menu_button("Edit",|ui|{
                 for(label,op)in[("Undo","undo"),("Redo","redo"),("Remove selected","delete")]{if ui.button(label).clicked(){operation=Some(op);ui.close();}}
@@ -1647,6 +1678,7 @@ impl Studio {
     fn dialogs(&mut self, ctx: &egui::Context) {
         if self.settings_open {
             let mut open = true;
+            #[allow(unused_mut)]
             let mut gsr_action = None;
             egui::Window::new("Preferences")
                 .vscroll(true)
@@ -1655,6 +1687,8 @@ impl Studio {
                 .default_width(560.)
                 .resizable(false)
                 .show(ctx, |ui| {
+                    #[cfg(unix)]
+                    {
                     ui.label(
                         "GPU Screen Recorder owns capture: formats, replay durations, streaming, screenshots and shared shortcuts. Layer archives and edits the saved recordings.",
                     );
@@ -1683,6 +1717,7 @@ impl Studio {
                         if self.advanced_saved{ui.label("Capture options saved for the next session.");}
                     });
                     ui.separator();
+                    }
                     ui.label(RichText::new("Recording library").strong());
                     ui.add(
                         egui::TextEdit::singleline(&mut self.library_edit)
@@ -1697,10 +1732,11 @@ impl Studio {
                         });
                     }
                     ui.add_space(8.);
+                    #[cfg(unix)]
                     gsr_controls::hint(ui);
                     ui.label(
                         RichText::new(
-                            "Displays and application sounds are kept as independent sources. Choose what remains while editing.",
+                            "Choose which independent sources to keep while editing.",
                         )
                         .small()
                         .color(Color32::from_gray(185)),
@@ -1958,9 +1994,15 @@ impl eframe::App for Studio {
                     ui.add_space(ui.available_height() * 0.3);
                     ui.heading(if self.opening { "Opening recording…" } else { "Your recordings, ready to edit" });
                     ui.add_space(10.);
-                    ui.label("Capture with GPU Screen Recorder. Edit and archive in Layer.");
-                    ui.label("Select a recording from the library, or use Capture to save a replay.");
+                    #[cfg(unix)]
+                    {
+                        ui.label("Capture with GPU Screen Recorder. Edit and archive in Layer.");
+                        ui.label("Select a recording from the library, or use Capture to save a replay.");
+                    }
+                    #[cfg(windows)]
+                    ui.label("Select a recording from the library or open a Layer project.");
                     ui.add_space(6.);
+                    #[cfg(unix)]
                     gsr_controls::hint(ui);
                     ui.add_space(16.);
                     if button(ui, "Open recording…", true).clicked() {

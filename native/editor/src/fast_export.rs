@@ -3,10 +3,11 @@
 use crate::jobs::Control;
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use crate::media_process as process;
+use crate::media_process::MediaCommand;
 use std::{
     fs,
     io::{BufRead, BufReader, Read},
-    os::unix::process::CommandExt,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::Arc,
@@ -213,13 +214,12 @@ fn inspect_source(
 ) -> Result<()> {
     use std::{
         io,
-        os::fd::AsRawFd,
         thread,
         time::{Duration, Instant},
     };
     control.check()?;
-    let mut child=Command::new("ffprobe").args(["-v","error","-select_streams","v:0","-show_entries","stream=width,height,sample_aspect_ratio,duration:stream_tags=rotate:stream_side_data=rotation,displaymatrix:format=duration","-of","json"]).arg(file).process_group(0).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("Source validation needs FFprobe. Choose Render instead.")?;
-    control.set_pid(child.id());
+    let mut child=Command::new("ffprobe").args(["-v","error","-select_streams","v:0","-show_entries","stream=width,height,sample_aspect_ratio,duration:stream_tags=rotate:stream_side_data=rotation,displaymatrix:format=duration","-of","json"]).arg(file).isolate().stdout(Stdio::piped()).stderr(Stdio::null()).spawn().context("Source validation needs FFprobe. Choose Render instead.")?;
+    control.track(&mut child)?;
     struct Probe {
         child: std::process::Child,
         control: Arc<Control>,
@@ -227,9 +227,7 @@ fn inspect_source(
     impl Drop for Probe {
         fn drop(&mut self) {
             if !matches!(self.child.try_wait(), Ok(Some(_))) {
-                unsafe {
-                    libc::kill(-(self.child.id() as i32), libc::SIGKILL);
-                }
+                process::kill(&mut self.child);
                 let _ = self.child.wait();
             }
             self.control.set_pid(0);
@@ -240,9 +238,8 @@ fn inspect_source(
         control: control.clone(),
     };
     let mut stdout = process.child.stdout.take().unwrap();
-    let fd = stdout.as_raw_fd();
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+    #[cfg(unix)]
+    if !process::nonblocking(&stdout) {
         bail!("Could not inspect source metadata.");
     }
     let mut bytes = vec![];
@@ -252,9 +249,10 @@ fn inspect_source(
         if Instant::now() > deadline {
             bail!("Source inspection timed out. Choose Render instead.");
         }
+        let status = process.child.try_wait()?;
         let mut part = [0u8; 4096];
         loop {
-            match stdout.read(&mut part) {
+            match process::read_ready(&mut stdout, &mut part) {
                 Ok(0) => break,
                 Ok(count) => {
                     bytes.extend_from_slice(&part[..count]);
@@ -266,11 +264,7 @@ fn inspect_source(
                 Err(e) => return Err(e.into()),
             }
         }
-        if let Some(status) = process.child.try_wait()? {
-            let _ = stdout
-                .by_ref()
-                .take((16385usize.saturating_sub(bytes.len())) as u64)
-                .read_to_end(&mut bytes);
+        if let Some(status) = status {
             break status;
         }
         thread::sleep(Duration::from_millis(10));
@@ -412,12 +406,12 @@ pub fn run(request: &Value, control: Arc<Control>, progress: impl Fn(f64)) -> Re
     }
     cmd.args(["-progress", "pipe:1", "-stats_period", "0.2"])
         .arg(temp.path())
-        .process_group(0)
+        .isolate()
         .stdout(Stdio::piped())
         .stderr(Stdio::from(errors.try_clone()?));
     control.check()?;
     let mut child = cmd.spawn().context("Could not start packet-copy export")?;
-    control.set_pid(child.id());
+    control.track(&mut child)?;
     struct Guard<'a> {
         child: &'a mut std::process::Child,
         control: Arc<Control>,
@@ -425,9 +419,7 @@ pub fn run(request: &Value, control: Arc<Control>, progress: impl Fn(f64)) -> Re
     impl Drop for Guard<'_> {
         fn drop(&mut self) {
             if !matches!(self.child.try_wait(), Ok(Some(_))) {
-                unsafe {
-                    libc::kill(-(self.child.id() as i32), libc::SIGKILL);
-                }
+                process::kill(self.child);
                 let _ = self.child.wait();
             }
             self.control.set_pid(0);
@@ -708,9 +700,11 @@ pub fn cli() -> Option<Result<()>> {
             std::env::current_dir()?.join(output)
         };
         static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        #[cfg(unix)]
         extern "C" fn stop(_: i32) {
             CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
         }
+        #[cfg(unix)]
         unsafe {
             libc::signal(libc::SIGTERM, stop as *const () as libc::sighandler_t);
             libc::signal(libc::SIGINT, stop as *const () as libc::sighandler_t);
