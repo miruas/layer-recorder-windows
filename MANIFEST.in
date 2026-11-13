@@ -26,3 +26,5 @@ recursive-include packaging *.txt *.xml *.desktop *.Dockerfile *.sh
 include native/windows-capture/Cargo.toml native/windows-capture/Cargo.lock
 recursive-include native/windows-capture/src *.rs
 recursive-include packaging/windows *.iss
+
+recursive-include native/gsr-windows *.c *.cpp

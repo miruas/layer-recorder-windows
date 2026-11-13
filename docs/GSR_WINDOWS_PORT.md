@@ -39,6 +39,14 @@ After preparing the pinned sources, run:
 The test links the pinned MGL window API and rectangle renderer against a
 Win32/WGL backend. It checks rendered pixels, monitor enumeration, resize,
 Unicode input, key translation and window recreation on a Windows desktop.
-The backend provides the foundation for the original GSR widgets. The GSR
-page hierarchy, MGL font stack and transparent desktop compositing still
-need integration.
+The backend provides the foundation for the original GSR widgets. The GSR page hierarchy and transparent desktop compositing still need integration.
+
+## Original GSR dropdown on Windows
+
+Install the MSYS2 UCRT64 GCC, pkgconf and Pango packages, then run
+`tools/test-gsr-windows-widgets.ps1` in PowerShell. The test builds the pinned
+MGL and MGL++ graphics and Pango text code, and the original GSR Theme,
+Widget, Tooltip and DropdownButton classes. It loads the upstream image
+resources and verifies the NVIDIA accent pixel and the Start action of the
+Instant Replay dropdown. The test uses a hidden Win32 window and sends its
+input messages directly to that window.

@@ -1,4 +1,4 @@
-param([string]$Compiler = 'gcc')
+param([string]$Compiler = 'gcc', [switch]$GenerateOnly)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $checkout = Join-Path $root 'build/native/gsr-ui/source'
@@ -64,6 +64,8 @@ Set-Content $gl -Value (@('#include <windows.h>', '#include <mgl/gl.h>', '#inclu
     '}'
     'void mgl_gl_unload(mgl_gl *self) { memset(self, 0, sizeof(*self)); }'
 )) -Encoding utf8
+
+if ($GenerateOnly) { return }
 
 $exe = Join-Path $build 'mgl-win32-smoke.exe'
 & $Compiler -std=gnu11 -O2 -Wall -Wextra -static "-I$mgl/include" "$port/mgl_win32.c" "$port/mgl_smoke.c" "$port/mgl_smoke_text.c" $window $gl "$mgl/src/graphics/rectangle.c" "$mgl/src/system/clock.c" -o $exe -lopengl32 -lgdi32 -luser32

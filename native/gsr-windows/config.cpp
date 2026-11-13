@@ -74,6 +74,7 @@ bool starts_with(std::string_view text, const char *prefix) {
 }
 }
 
+#ifndef LAYER_GSR_CONFIG_LIBRARY
 int wmain(int argc, wchar_t **argv) {
     if ((argc != 2 && argc != 3) || std::wstring_view(argv[1]) != L"validate") {
         std::cerr << "Usage: layer-gsr-config validate [config_ui]\n";
@@ -100,3 +101,4 @@ int wmain(int argc, wchar_t **argv) {
         return 1;
     }
 }
+#endif
