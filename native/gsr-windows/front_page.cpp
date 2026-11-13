@@ -19,7 +19,7 @@ void WindowsFrontPage::resize(mgl::vec2i size) {
 }
 
 void WindowsFrontPage::open_screenshot_settings_page() {
-    page_stack.push(std::make_unique<ScreenshotSettingsPage>(&gsr_info, config, &page_stack, false, false));
+    page_stack.push(std::make_unique<ScreenshotSettingsPage>(&gsr_info, config, &page_stack, false, true));
 }
 
 bool WindowsFrontPage::back() {

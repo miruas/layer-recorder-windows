@@ -352,7 +352,8 @@ def capture_controls(library, *, background=False):
                     overlay.wait(timeout=2)
                 settings = screenshot_settings()
                 source = screenshot_source(settings, action)
-                submit("screenshot", lambda: take_screenshot(source, settings))
+                clipboard_owner = root.winfo_id()
+                submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                 status.set(str(error))
         elif action == "toggle_record":
@@ -502,6 +503,8 @@ def capture_controls(library, *, background=False):
                 status.set(error)
                 if action == "stop":
                     closing = False
+            elif action == "screenshot" and value is None:
+                status.set("Screenshot copied to the clipboard.")
             elif isinstance(value, (str, Path)):
                 status.set(f"Saved {value}")
             elif action == "stop":

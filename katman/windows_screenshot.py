@@ -3,11 +3,13 @@
 import ctypes
 from ctypes import wintypes
 from datetime import datetime
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 
 from .windows_capture import displays
 
@@ -54,9 +56,62 @@ def screenshot_source(settings, target):
             "-video_size", f"{monitor.width}x{monitor.height}", "-i", "desktop"]
 
 
-def take_screenshot(source, settings):
-    if not settings.get("save_screenshot_to_disk", True):
-        raise RuntimeError("Enable Save screenshot to disk in the GSR screenshot settings.")
+def copy_image_to_clipboard(image_bytes, owner):
+    from PIL import Image
+
+    bmp = BytesIO()
+    with Image.open(BytesIO(image_bytes)) as image:
+        image.convert("RGB").save(bmp, format="BMP")
+    dib = bmp.getvalue()[14:]  # CF_DIB starts at the DIB header.
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalFree.restype = wintypes.HGLOBAL
+
+    handle = kernel32.GlobalAlloc(0x0002, len(dib))  # GMEM_MOVEABLE
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        address = kernel32.GlobalLock(handle)
+        if not address:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            ctypes.memmove(address, dib, len(dib))
+        finally:
+            kernel32.GlobalUnlock(handle)
+
+        for attempt in range(6):
+            if user32.OpenClipboard(owner):
+                break
+            if attempt == 5:
+                raise ctypes.WinError(ctypes.get_last_error())
+            time.sleep(0.025)
+        try:
+            if not user32.EmptyClipboard() or not user32.SetClipboardData(8, handle):  # CF_DIB
+                raise ctypes.WinError(ctypes.get_last_error())
+            handle = None  # Windows owns the allocation after SetClipboardData.
+        finally:
+            user32.CloseClipboard()
+    finally:
+        if handle:
+            kernel32.GlobalFree(handle)
+
+
+def take_screenshot(source, settings, clipboard_owner=None):
+    save_to_disk = settings.get("save_screenshot_to_disk", True)
+    save_to_clipboard = settings.get("save_screenshot_to_clipboard", False)
+    if not save_to_disk and not save_to_clipboard:
+        raise RuntimeError("Enable a screenshot destination in the GSR screenshot settings.")
+    if save_to_clipboard and not clipboard_owner:
+        raise RuntimeError("The Windows clipboard owner is unavailable.")
     extension = "png" if settings.get("image_format") == "png" else "jpg"
     quality = {"medium": "6", "high": "4", "very_high": "2", "ultra": "1"}
     command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "gdigrab",
@@ -74,6 +129,18 @@ def take_screenshot(source, settings):
     result = subprocess.run(command, capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode or not result.stdout:
         raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip() or "Screenshot capture failed.")
+    path = save_image(result.stdout, settings, extension) if save_to_disk else None
+    if save_to_clipboard:
+        try:
+            copy_image_to_clipboard(result.stdout, clipboard_owner)
+        except OSError as error:
+            if path is not None:
+                raise RuntimeError(f"Saved {path}. Could not copy to the clipboard: {error}") from error
+            raise
+    return path
+
+
+def save_image(data, settings, extension):
     configured = settings.get("save_directory")
     directory = Path(configured) if isinstance(configured, str) and configured else Path.home() / "Pictures"
     directory.mkdir(parents=True, exist_ok=True)
@@ -82,7 +149,7 @@ def take_screenshot(source, settings):
     with tempfile.NamedTemporaryFile(dir=directory, delete=False) as temporary:
         pending = Path(temporary.name)
         try:
-            temporary.write(result.stdout)
+            temporary.write(data)
             temporary.close()
             pending.replace(path)
         finally:

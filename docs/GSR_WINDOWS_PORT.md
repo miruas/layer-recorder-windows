@@ -68,5 +68,6 @@ original GSR screenshot settings and saves them to the GSR configuration.
 The Windows directory picker backend preserves Unicode paths. With global
 shortcuts enabled, Print Screen saves the configured monitor or window and
 Shift+Print Screen saves the foreground window. PNG and JPEG use the
-configured directory and resolution. Region selection, clipboard output,
-the other native GSR settings, pause and livestream still need integration.
+configured directory and resolution. Clipboard output can be enabled
+independently of disk output. Region selection, the other native GSR settings,
+pause and livestream still need integration.
