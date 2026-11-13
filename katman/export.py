@@ -162,7 +162,7 @@ def export_project(path, destination, progress=None, cancel=None, preview=False)
                 parts.append(part)
                 finished += (sec["end"]-sec["start"])/sec.get("speed",1)
             listing = td / "parts.txt"
-            listing.write_text("\n".join("file '" + str(p).replace("'", "'\\''") + "'" for p in parts))
+            listing.write_text("\n".join("file " + p.name for p in parts), encoding="ascii")
             from .common import run
             run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
                  "-i", listing, "-c", "copy", "-movflags", "+faststart", temp_output], timeout=180)

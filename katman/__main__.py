@@ -42,6 +42,10 @@ def ensure_daemon():
 
 
 def main():
+    if os.name == "nt":
+        from .windows_app import main as windows_main
+        return windows_main()
+
     # Exact native GSR passthrough keeps every upstream flag available without
     # changing Layer's managed independent-source capture or RAM replay buffer.
     if sys.argv[1:2] in (["gsr-native"],["gsr-ipc"]):

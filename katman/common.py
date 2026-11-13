@@ -7,11 +7,16 @@ from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent
 ASSETS = Path(__file__).resolve().parent / "assets"
-CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "katman"
-CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "katman"
-RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/katman-{os.getuid()}")) / "katman"
-for directory in (CONFIG, CACHE, RUNTIME):
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+if os.name == "nt":
+    CONFIG = Path(os.environ.get("APPDATA", Path.home() / "AppData/Roaming")) / "Layer"
+    CACHE = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "Layer"
+    RUNTIME = CACHE / "runtime"
+else:
+    CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "katman"
+    CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "katman"
+    RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/tmp/katman-{os.getuid()}")) / "katman"
+    for directory in (CONFIG, CACHE, RUNTIME):
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
 SOCKET = RUNTIME / "control.sock"
 
 
@@ -24,7 +29,7 @@ def atomic_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2))
+    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -107,7 +112,7 @@ def load_project(path):
     path = Path(path).expanduser().resolve()
     if path.is_dir():
         path /= "project.katman"
-    p = json.loads(path.read_text())
+    p = json.loads(path.read_text(encoding="utf-8"))
     if p.get("format") != "katman" or p.get("version") != 1:
         raise ValueError("This project format is not supported.")
     for source in p["sources"]:
