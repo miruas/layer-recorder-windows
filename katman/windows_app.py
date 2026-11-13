@@ -343,6 +343,18 @@ def capture_controls(library, *, background=False):
     def handle_hotkey(action):
         if action == "toggle_overlay":
             toggle_overlay()
+        elif action in {"screenshot", "screenshot_window"}:
+            from .windows_screenshot import screenshot_settings, screenshot_source, take_screenshot
+
+            try:
+                if overlay is not None and overlay.poll() is None:
+                    stop_overlay()
+                    overlay.wait(timeout=2)
+                settings = screenshot_settings()
+                source = screenshot_source(settings, action)
+                submit("screenshot", lambda: take_screenshot(source, settings))
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                status.set(str(error))
         elif action == "toggle_record":
             if capture is None:
                 start("record")

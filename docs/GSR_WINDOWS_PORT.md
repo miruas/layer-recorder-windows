@@ -65,6 +65,8 @@ The Layer tray and Alt+Z launch that overlay. Record, Replay, Replay Save
 and Recordings dispatch to the existing Windows capture controller and Studio.
 The main gear opens the Windows controls. The screenshot gear opens the
 original GSR screenshot settings and saves them to the GSR configuration.
-The Windows directory picker backend preserves Unicode paths. Screenshot
-capture, the other native GSR settings, pause and livestream still need
-integration.
+The Windows directory picker backend preserves Unicode paths. With global
+shortcuts enabled, Print Screen saves the configured monitor or window and
+Shift+Print Screen saves the foreground window. PNG and JPEG use the
+configured directory and resolution. Region selection, clipboard output,
+the other native GSR settings, pause and livestream still need integration.
