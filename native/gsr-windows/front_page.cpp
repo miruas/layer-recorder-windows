@@ -3,6 +3,7 @@
 #include "Theme.hpp"
 #include "Translation.hpp"
 #include "gui/DropdownButton.hpp"
+#include "gui/ScreenshotSettingsPage.hpp"
 #include <mglpp/window/Window.hpp>
 #include <utility>
 
@@ -15,6 +16,16 @@ void WindowsFrontPage::resize(mgl::vec2i size) {
     window_size = size;
     get_theme().set_window_size(size);
     recreate_frontpage_ui_components();
+}
+
+void WindowsFrontPage::open_screenshot_settings_page() {
+    page_stack.push(std::make_unique<ScreenshotSettingsPage>(&gsr_info, config, &page_stack, false, false));
+}
+
+bool WindowsFrontPage::back() {
+    if (page_stack.empty()) return false;
+    page_stack.pop();
+    return !page_stack.empty();
 }
 
 void WindowsFrontPage::set_capture_state(bool recording, bool replay) {

@@ -15,7 +15,7 @@ class DropdownButton;
 enum class FrontPageAction {
     replay_toggle, replay_save, replay_save_short, replay_save_long, replay_settings,
     record_toggle, record_pause, record_settings,
-    stream_toggle, stream_settings, recordings, settings, screenshot_settings
+    stream_toggle, stream_settings, recordings, settings
 };
 
 class WindowsFrontPage {
@@ -24,6 +24,7 @@ public:
     void resize(mgl::vec2i size);
     void set_capture_state(bool recording, bool replay);
     bool on_event(mgl::Event &event, mgl::Window &window);
+    bool back();
     void draw(mgl::Window &window);
 
 private:
@@ -39,7 +40,7 @@ private:
     void open_stream_settings_page() { action(FrontPageAction::stream_settings); }
     void on_press_start_stream() { action(FrontPageAction::stream_toggle); }
     void open_settings_page() { action(FrontPageAction::settings); }
-    void open_screenshot_settings_page() { action(FrontPageAction::screenshot_settings); }
+    void open_screenshot_settings_page();
 
     Config &config;
     GsrInfo &gsr_info;

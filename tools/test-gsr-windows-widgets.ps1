@@ -18,7 +18,9 @@ if (!(Test-Path $pkg)) { throw 'Install the MSYS2 UCRT64 gcc, pkgconf and pango 
 & (Join-Path $PSScriptRoot 'build-gsr-windows-config.ps1') -Compiler $cxx
 & (Join-Path $PSScriptRoot 'test-mgl-windows.ps1') -GenerateOnly
 $frontPage = Join-Path $build 'front_page_generated.cpp'
+$fileChooser = Join-Path $build 'file_chooser_generated.cpp'
 & (Join-Path $PSScriptRoot 'Get-GsrWindowsFrontPage.ps1') -Source $source -OutputFile $frontPage
+& (Join-Path $PSScriptRoot 'Get-GsrWindowsFileChooser.ps1') -Source $source -OutputFile $fileChooser
 $includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Pango and GIO headers are required.' }
@@ -29,9 +31,11 @@ $cSources = @("$port/mgl_win32.c", "$port/mgl_files_win32.c", "$build/window_api
 $cSources += (Get-ChildItem "$mgl/src/graphics" -Filter '*.c').FullName
 $cppSources = @("$port/config.cpp", "$build/key_names.cpp",
     "$source/src/Config.cpp", "$source/src/Theme.cpp", "$source/src/Translation.cpp",
-    "$port/front_page.cpp", $frontPage)
+    "$port/front_page.cpp", "$port/settings_platform.cpp", $frontPage, $fileChooser)
 $cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils', 'Page', 'PageStack', 'StaticPage',
-    'List', 'CustomRendererWidget', 'Label', 'Image', 'Button') | ForEach-Object { "$source/src/gui/$_.cpp" }
+    'List', 'CustomRendererWidget', 'Label', 'Image', 'Button', 'ScreenshotSettingsPage',
+    'GsrPage', 'ScrollablePage', 'Subsection', 'RadioButton', 'LineSeparator', 'ComboBox', 'CheckBox',
+    'Entry') | ForEach-Object { "$source/src/gui/$_.cpp" }
 $cppSources += (Get-ChildItem "$pp/src" -Recurse -Filter '*.cpp' |
     Where-Object { $_.Name -ne 'Keyboard.cpp' }).FullName
 $objects = @()
@@ -47,10 +51,24 @@ foreach ($file in $cSources + $cppSources) {
 }
 $exe = Join-Path $build 'gsr-widget-win32-smoke.exe'
 $windowsLibs = @('-lopengl32', '-lgdi32', '-luser32', '-lshell32', '-lole32', '-luuid')
-& $cxx -std=c++17 -O2 @includes "$port/gsr_widget_smoke.cpp" @objects @libs @windowsLibs -o $exe
+$testConfig = Join-Path $build 'widget-config-test.o'
+& $cxx -std=c++17 -O2 -DLAYER_GSR_CONFIG_LIBRARY -DLAYER_GSR_CONFIG_TEST @includes -c "$port/config.cpp" -o $testConfig
+if ($LASTEXITCODE -ne 0) { throw 'Could not compile the isolated GSR test configuration.' }
+# The first object in the C++ group is the production config adapter.
+$testObjects = $objects.Clone()
+$testObjects[$cSources.Count] = $testConfig
+& $cxx -std=c++17 -O2 @includes "$port/gsr_widget_smoke.cpp" @testObjects @libs @windowsLibs -o $exe
 if ($LASTEXITCODE -ne 0) { throw 'Could not link the GSR widget test.' }
-& $exe $source
-if ($LASTEXITCODE -ne 0) { throw "GSR widget test failed with exit code $LASTEXITCODE." }
+$env:LAYER_GSR_TEST_CONFIG_DIR = Join-Path $build 'widget-test-config'
+try {
+    & $exe $source
+    if ($LASTEXITCODE -ne 0) { throw "GSR widget test failed with exit code $LASTEXITCODE." }
+    if (!(Test-Path -LiteralPath "$env:LAYER_GSR_TEST_CONFIG_DIR/config_ui")) {
+        throw 'The screenshot settings page did not save its configuration.'
+    }
+} finally {
+    Remove-Item Env:LAYER_GSR_TEST_CONFIG_DIR
+}
 $overlay = Join-Path $build 'layer-gsr-overlay.exe'
 & $cxx -std=c++17 -O2 -municode -mwindows @includes "$port/overlay_main.cpp" @objects @libs @windowsLibs -o $overlay
 if ($LASTEXITCODE -ne 0) { throw 'Could not link the native GSR overlay.' }

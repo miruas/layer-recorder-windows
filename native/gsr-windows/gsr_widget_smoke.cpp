@@ -44,8 +44,18 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     send(WM_MOUSEMOVE, 470, 10);
     send(WM_LBUTTONDOWN, 470, 10);
     const bool closed = !send(WM_LBUTTONUP, 470, 10);
-    return closed && actions == std::vector<Action>{
-        Action::replay_toggle, Action::record_toggle, Action::stream_toggle, Action::recordings};
+    if (!closed || actions != std::vector<Action>{
+        Action::replay_toggle, Action::record_toggle, Action::stream_toggle, Action::recordings})
+        return false;
+
+    page.resize({480, 360});
+    page.draw(window);
+    // The screenshot gear is above the main settings gear, right of Recordings.
+    send(WM_MOUSEMOVE, 403, 90);
+    send(WM_LBUTTONDOWN, 403, 90);
+    send(WM_LBUTTONUP, 403, 90);
+    // Going back must return to the home page, then close the home page.
+    return page.back() && !page.back();
 }
 
 static int test(const std::string &resources) {

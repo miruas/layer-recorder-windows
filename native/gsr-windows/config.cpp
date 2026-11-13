@@ -30,6 +30,10 @@ std::string known_folder(const KNOWNFOLDERID &id) {
 
 namespace gsr {
 std::string get_config_dir() {
+#ifdef LAYER_GSR_CONFIG_TEST
+    if (const auto *test_dir = _wgetenv(L"LAYER_GSR_TEST_CONFIG_DIR"))
+        return fs::path(test_dir).u8string();
+#endif
     return known_folder(FOLDERID_RoamingAppData) + "/Layer/GSR";
 }
 std::string get_videos_dir() { return known_folder(FOLDERID_Videos); }

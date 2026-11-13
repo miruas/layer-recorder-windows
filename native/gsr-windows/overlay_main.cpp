@@ -64,7 +64,9 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
     if (!gsr::init_theme(resources)) return 5;
 
     gsr::GsrInfo info{};
-    const gsr::SupportedCaptureOptions options{};
+    info.supported_image_formats.png = true;
+    info.supported_image_formats.jpeg = true;
+    const auto options = gsr::get_supported_capture_options(info);
     auto config = gsr::read_config(options).value_or(gsr::Config(options));
     gsr::Translation::instance().init((resources + "translations/").c_str(), config.main_config.language.c_str());
     gsr::init_color_theme(config, info);
@@ -103,9 +105,10 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
         while (open && window.is_open()) {
             mgl::Event event;
             while (open && window.poll_event(event)) {
-                if (event.type == mgl::Event::Closed ||
-                    (event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape)) {
+                if (event.type == mgl::Event::Closed) {
                     open = false;
+                } else if (event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape) {
+                    open = page.back();
                 } else {
                     const bool page_open = page.on_event(event, window);
                     open = open && page_open;
