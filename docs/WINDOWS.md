@@ -17,7 +17,7 @@ Open a new PowerShell window so it sees the updated PATH.
 git clone https://github.com/miruas/layer-recorder-windows.git
 cd layer-recorder-windows
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install .
+.\.venv\Scripts\python.exe -m pip install -e .
 .\.venv\Scripts\layer.exe doctor
 .\.venv\Scripts\layer.exe
 ```
