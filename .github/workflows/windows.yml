@@ -15,6 +15,17 @@ jobs:
           python-version: '3.12'
       - name: Install Layer
         run: python -m pip install .
+      - name: Install verified FFmpeg build
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP ffmpeg.zip
+          $destination = Join-Path $env:RUNNER_TEMP layer-ffmpeg
+          $url = 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-full_build.zip'
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '759d0a9831c436a0eb331ad36f236c06cb04aaa0005da46571f0e9d3d9206f6b') {
+            throw 'FFmpeg archive SHA256 mismatch.'
+          }
+          Expand-Archive $archive -DestinationPath $destination
+          Join-Path $destination 'ffmpeg-9.0.2-full_build/bin' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Check FFmpeg
         run: |
           ffmpeg -version
