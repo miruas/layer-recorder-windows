@@ -15,7 +15,10 @@ fn launch() -> anyhow::Result<()> {
     command
         .env("PATH", path)
         .env("PYTHONUTF8", "1")
-        .env("PYTHONNOUSERSITE", "1");
+        .env("PYTHONNOUSERSITE", "1")
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env_remove("PYTHONPATH")
+        .env_remove("PYTHONHOME");
     if let [file] = args.as_slice()
         && PathBuf::from(file)
             .extension()

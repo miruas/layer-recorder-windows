@@ -17,7 +17,7 @@ UninstallDisplayIcon={app}\katman\assets\layer.ico
 SetupIconFile={#Stage}\katman\assets\layer.ico
 Compression=lzma2/fast
 SolidCompression=yes
-ArchiveExtraction=enhanced
+ArchiveExtraction=full
 OutputDir={#OutDir}
 OutputBaseFilename=Layer-Setup-x64
 ChangesAssociations=yes
@@ -29,7 +29,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 Name: "projects"; Description: "Add Layer Studio to Open with for .katman projects"; Flags: unchecked
 
 [Files]
-Source: "{#Stage}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "{#Stage}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion; Excludes: "__pycache__,*.pyc,*.pyo"
 Source: "{tmp}\ffmpeg.zip"; DestDir: "{app}\media-tools"; Flags: external extractarchive ignoreversion recursesubdirs; Excludes: "*.html,*.ffpreset"; Check: NeedsMedia
 
 [Icons]
