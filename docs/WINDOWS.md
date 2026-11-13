@@ -4,21 +4,9 @@ The Windows port of [Layer Recorder](https://github.com/miruas/layer-recorder) s
 
 ## Install
 
-Use 64-bit Windows with Python 3.12 and FFmpeg. Install both with WinGet:
+Download **Layer-Setup-x64.exe** from the **Layer-Setup-x64** artifact of a successful [Windows workflow run](https://github.com/miruas/layer-recorder-windows/actions/workflows/windows.yml). Run Setup and open **Layer Recorder** or **Layer Studio** from the Start menu. Setup installs for the current user and downloads a checksum-verified FFmpeg build on first installation. Python and the media workers run from Layer's private installation directory.
 
-```powershell
-winget install --id Python.Python.3.12 --exact
-winget install --id Gyan.FFmpeg --exact
-```
-
-Open a new PowerShell window so it sees the updated PATH. Download **Layer-Windows-x64** from a successful [Windows workflow run](https://github.com/miruas/layer-recorder-windows/actions/workflows/windows.yml). Extract the artifact and the inner ZIP, then run:
-
-```powershell
-.\tools\install-windows.ps1
-.\Layer.cmd
-```
-
-The installer creates a Python environment under local app data. If you move the extracted directory, rerun the installer.
+Setup offers an optional desktop shortcut, launch at sign-in, and an **Open with** entry for `.katman` projects. Closing the recorder window leaves it in the Windows notification area, where you can start or stop recording and replay, save recent footage, and open Studio. Select **Exit Layer** from that menu to finish capture and close the recorder. A second launch opens the existing recorder window. Use **Settings → Apps → Installed apps** to uninstall. Projects and user preferences are stored separately.
 
 ## Capture and replay
 

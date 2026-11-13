@@ -461,7 +461,10 @@ def play_pcm(stream, ready, closed):
 
 
 def capture_audio_command(source):
-    return [sys.executable, "-m", "katman.windows_audio", "capture",
+    executable = Path(sys.executable)
+    if executable.name.lower() == "pythonw.exe":
+        executable = executable.with_name("python.exe")
+    return [str(executable), "-m", "katman.windows_audio", "capture",
             source.kind, source.endpoint, str(source.pid)]
 
 

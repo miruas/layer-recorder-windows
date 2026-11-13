@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from .common import APP, SETTINGS_FILE
+from .common import APP, ASSETS, SETTINGS_FILE
 from .windows_capture import Capture, capture_binary, displays
 from .windows_hotkeys import GlobalHotkeys
 
@@ -32,6 +32,11 @@ def default_library():
 def export(path, output):
     from .export import export_project
     return export_project(path, output)
+
+
+def console_python():
+    executable = Path(sys.executable)
+    return str(executable.with_name("python.exe")) if executable.name.lower() == "pythonw.exe" else str(executable)
 
 
 def editor_command(project=None, library=None):
@@ -74,12 +79,25 @@ def file_dialog(mode, kind):
         root.destroy()
 
 
-def capture_controls(library):
+def capture_controls(library, *, background=False):
     import tkinter as tk
     from tkinter import filedialog, ttk
 
-    root = tk.Tk()
+    from .windows_tray import RecorderInstance, create_tray
+
+    instance = RecorderInstance()
+    if not instance.primary:
+        instance.close()
+        return
+    try:
+        root = tk.Tk()
+    except Exception:
+        instance.close()
+        raise
     root.title("Layer Recorder")
+    icon_file = ASSETS / "layer.ico"
+    if icon_file.is_file():
+        root.iconbitmap(default=str(icon_file))
     root.minsize(540, 520)
     panel = ttk.Frame(root, padding=20)
     panel.pack(fill="both", expand=True)
@@ -97,6 +115,24 @@ def capture_controls(library):
     busy = False
     closing = False
     results = queue.SimpleQueue()
+    tray_events = queue.SimpleQueue()
+    tray = tray_ready = None
+    if icon_file.is_file():
+        try:
+            tray, tray_ready = create_tray(tray_events, icon_file)
+        except (ImportError, OSError):
+            pass
+
+    def show():
+        root.deiconify()
+        root.state("normal")
+        root.lift()
+
+    def hide():
+        if tray_ready and tray_ready.is_set() and tray.visible:
+            root.withdraw()
+        else:
+            close()
 
     ttk.Label(panel, text="Displays").grid(row=0, column=0, sticky="w")
     monitor_panel = ttk.Frame(panel)
@@ -275,7 +311,8 @@ def capture_controls(library):
     def open_editor():
         try:
             command = editor_command(library=library)
-            subprocess.Popen(command, env={**os.environ, "LAYER_PYTHON": sys.executable})
+            subprocess.Popen(command, env={**os.environ, "LAYER_PYTHON": console_python()},
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, RuntimeError) as error:
             status.set(str(error))
 
@@ -329,6 +366,23 @@ def capture_controls(library):
 
     def poll():
         nonlocal capture, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
+        if instance.show_requested():
+            show()
+        try:
+            tray_action = tray_events.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            if tray_action == "show":
+                show()
+            elif tray_action == "editor":
+                open_editor()
+            elif tray_action == "exit":
+                close()
+                if not busy:
+                    return
+            elif not busy and not closing:
+                handle_hotkey(tray_action)
         try:
             action, value, error = results.get_nowait()
         except queue.Empty:
@@ -400,7 +454,10 @@ def capture_controls(library):
             submit("reconcile", lambda: sync_sources(session, inspect_audio))
         root.after(120, poll)
 
-    root.protocol("WM_DELETE_WINDOW", close)
+    root.protocol("WM_DELETE_WINDOW", hide)
+    if background:
+        root.after(400, lambda: root.withdraw()
+                   if tray_ready and tray_ready.is_set() and tray.visible else None)
     refresh()
     update_buttons()
     root.after(150, poll)
@@ -408,8 +465,11 @@ def capture_controls(library):
     try:
         root.mainloop()
     finally:
+        if tray:
+            tray.stop()
         if hotkeys:
             hotkeys.close()
+        instance.close()
 
 
 def main():
@@ -419,14 +479,16 @@ def main():
     parser.add_argument("command", nargs="?", default="ui", choices=("ui", "editor", "displays", "audio", "doctor", "export"))
     parser.add_argument("project", nargs="?")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--library", type=Path, default=default_library())
     args = parser.parse_args()
     try:
         if args.command == "ui":
-            capture_controls(args.library.expanduser().resolve())
+            capture_controls(args.library.expanduser().resolve(), background=args.background)
         elif args.command == "editor":
             result = subprocess.run(editor_command(args.project, args.library.expanduser().resolve()),
-                                    env={**os.environ, "LAYER_PYTHON": sys.executable})
+                                    env={**os.environ, "LAYER_PYTHON": console_python()},
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             raise SystemExit(result.returncode)
         elif args.command == "export":
             if args.project is None or args.output is None:
@@ -457,7 +519,11 @@ def main():
             if not engine.is_file() or not all(paths.values()) or not capture_available or "libx264" not in available:
                 raise SystemExit(1)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print(error, file=sys.stderr)
+        if sys.stderr is None:
+            from tkinter.messagebox import showerror
+            showerror("Layer Recorder", str(error))
+        else:
+            print(error, file=sys.stderr)
         raise SystemExit(1) from error
 
 

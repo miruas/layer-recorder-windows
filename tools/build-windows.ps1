@@ -11,3 +11,7 @@ foreach ($component in @{ editor = 'layer-studio'; 'windows-capture' = 'layer-ca
     if ($LASTEXITCODE -ne 0) { throw "$($component.Value) build failed." }
     Copy-Item -LiteralPath (Join-Path $target "release/$($component.Value).exe") -Destination $bin
 }
+$captureManifest = Join-Path $root 'native/windows-capture/Cargo.toml'
+$metadata = & cargo metadata --locked --no-deps --format-version 1 --manifest-path $captureManifest
+if ($LASTEXITCODE -ne 0) { throw 'Could not read the launcher build configuration.' }
+Copy-Item -LiteralPath (Join-Path ($metadata | ConvertFrom-Json).target_directory 'release/layer.exe') -Destination $bin

@@ -69,3 +69,21 @@ jobs:
             Layer-Windows-x64.zip
             Layer-Windows-x64.zip.sha256
           if-no-files-found: error
+      - name: Build Windows Setup
+        if: github.event_name == 'push'
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (!(Test-Path -LiteralPath $compiler)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          ./tools/build-windows-installer.ps1 -PythonRoot $env:pythonLocation -Stage "$env:RUNNER_TEMP/layer-setup-stage" -Output . -Compiler $compiler
+      - name: Upload Windows Setup
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v6
+        with:
+          name: Layer-Setup-x64
+          path: |
+            Layer-Setup-x64.exe
+            Layer-Setup-x64.exe.sha256
+          if-no-files-found: error
