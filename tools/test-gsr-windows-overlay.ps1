@@ -1,7 +1,11 @@
-param([string]$Toolchain = 'C:/msys64/ucrt64/bin')
+param(
+    [string]$Toolchain = 'C:/msys64/ucrt64/bin',
+    [string]$OverlayDirectory = '',
+    [switch]$SelectRecordings
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$env:Path = "$Toolchain;$env:Path"
+if (!$OverlayDirectory) { $env:Path = "$Toolchain;$env:Path" }
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -44,9 +48,18 @@ $info = [GsrOverlayTest+MonitorInfo]::new()
 $info.Size = 40
 if (![GsrOverlayTest]::GetMonitorInfo($monitor, [ref]$info)) { throw 'Could not query monitor bounds.' }
 
-$exe = Join-Path $root 'build/native/gsr-windows/layer-gsr-overlay.exe'
-$source = Join-Path $root 'build/native/gsr-ui/source'
-$process = Start-Process -FilePath $exe -ArgumentList ('"' + $source + '"') -PassThru -WindowStyle Hidden
+if ($OverlayDirectory) {
+    $exe = Join-Path $OverlayDirectory 'layer-gsr-overlay.exe'
+    $source = (Resolve-Path (Join-Path $OverlayDirectory 'resources')).Path
+} else {
+    $exe = Join-Path $root 'build/native/gsr-windows/layer-gsr-overlay.exe'
+    $source = Join-Path $root 'build/native/gsr-ui/source'
+}
+$launch = [System.Diagnostics.ProcessStartInfo]::new($exe)
+$launch.ArgumentList.Add($source)
+$launch.UseShellExecute = $false
+$launch.RedirectStandardOutput = $true
+$process = [System.Diagnostics.Process]::Start($launch)
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
@@ -62,9 +75,31 @@ try {
         $bounds.Right -ne $info.Bounds.Right -or $bounds.Bottom -ne $info.Bounds.Bottom) {
         throw 'The overlay did not cover the cursor monitor.'
     }
-    if (![GsrOverlayTest]::PostMessage($window, 0x100, [IntPtr]27, [IntPtr]1)) { throw 'Could not send Escape.' }
-    if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'Escape did not close the overlay cleanly.' }
-    Write-Host 'The native GSR overlay covered the cursor monitor and closed on Escape.'
+    if ($SelectRecordings) {
+        $height = $bounds.Bottom - $bounds.Top
+        $width = $bounds.Right - $bounds.Left
+        $cardSize = [int][Math]::Floor($height / 5)
+        $x = [int]($width / 2 + 1.5 * $cardSize)
+        foreach ($y in @([int]($height / 4), [int]($height / 4 + $cardSize / 2 + $height / 90))) {
+            $position = [IntPtr](($y -shl 16) -bor $x)
+            if (![GsrOverlayTest]::PostMessage($window, 0x200, [IntPtr]0, $position) -or
+                ![GsrOverlayTest]::PostMessage($window, 0x201, [IntPtr]1, $position) -or
+                ![GsrOverlayTest]::PostMessage($window, 0x202, [IntPtr]0, $position)) {
+                throw 'Could not click the Recordings card.'
+            }
+        }
+    } elseif (![GsrOverlayTest]::PostMessage($window, 0x100, [IntPtr]27, [IntPtr]1)) {
+        throw 'Could not send Escape.'
+    }
+    if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'The overlay did not close cleanly.' }
+    $action = $process.StandardOutput.ReadToEnd().Trim()
+    if ($SelectRecordings) {
+        if ($action -ne 'recordings') { throw "Unexpected overlay action '$action'." }
+        Write-Host 'The native overlay returned the Recordings action.'
+    } else {
+        if ($action) { throw "Escape returned an unexpected overlay action '$action'." }
+        Write-Host 'The native GSR overlay covered the cursor monitor and closed on Escape.'
+    }
 } finally {
     if (!$process.HasExited) { $process.Kill() }
     $process.Dispose()

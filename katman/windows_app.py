@@ -109,6 +109,7 @@ def capture_controls(library, *, background=False):
     capture = None
     mode = None
     overlay = None
+    overlay_dismissed = False
     hotkeys = None
     next_inventory = 0.0
     next_audio_inventory = 0.0
@@ -294,52 +295,50 @@ def capture_controls(library, *, background=False):
         status.set("Saving replay…")
         submit("save", lambda: capture.save_replay(seconds))
 
+    def stop_overlay():
+        nonlocal overlay_dismissed
+        if overlay is not None and overlay.poll() is None:
+            overlay_dismissed = True
+            try:
+                overlay.terminate()
+            except ProcessLookupError:
+                pass
+
     def toggle_overlay():
-        nonlocal overlay
-        if overlay is not None and overlay.winfo_exists():
-            overlay.destroy()
-            overlay = None
+        nonlocal overlay, overlay_dismissed
+        if overlay is not None:
+            stop_overlay()
             return
-        overlay = tk.Toplevel(root)
-        overlay.title("Layer Overlay")
-        overlay.attributes("-topmost", True)
-        overlay.resizable(False, False)
-        overlay.bind("<Escape>", lambda _event: toggle_overlay())
-        box = ttk.Frame(overlay, padding=16)
-        box.pack(fill="both", expand=True)
-        ttk.Label(box, text="Layer Recorder", font=("Segoe UI", 15, "bold")).pack(anchor="w")
-        ttk.Label(box, textvariable=status, wraplength=370).pack(anchor="w", pady=(4, 0))
-        ttk.Label(box, textvariable=replay_status, wraplength=370).pack(anchor="w")
-        controls = ttk.Frame(box)
-        controls.pack(fill="x", pady=(10, 0))
+        executable = APP / "overlay/layer-gsr-overlay.exe"
+        resources = APP / "overlay/resources"
+        try:
+            overlay_dismissed = False
+            overlay = subprocess.Popen(
+                [str(executable), str(resources), mode or "idle"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except OSError as error:
+            status.set(f"Could not open the GSR overlay: {error}")
+            show()
 
-        def action(name):
-            if busy:
-                return
-            toggle_overlay()
-            handle_hotkey(name)
-
-        buttons = [
-            ("Stop recording" if mode == "record" else "Start recording", "toggle_record"),
-            ("Stop replay" if mode == "replay" else "Start replay", "toggle_replay"),
-            ("Save last minute", "save_short"),
-            ("Save last five minutes", "save_long"),
-        ]
-        for index, (label, name) in enumerate(buttons):
-            button = ttk.Button(controls, text=label, command=lambda name=name: action(name))
-            button.grid(row=index // 2, column=index % 2, sticky="ew", padx=3, pady=3)
-            if busy or (name.startswith("save_") and capture is None) or (
-                    name == "toggle_record" and mode == "replay") or (
-                    name == "toggle_replay" and mode == "record"):
-                button.state(["disabled"])
-        controls.columnconfigure((0, 1), weight=1)
-        ttk.Button(box, text="Open Studio", command=lambda: (toggle_overlay(), open_editor())).pack(
-            anchor="e", pady=(8, 0))
-        overlay.update_idletasks()
-        x = max(0, (overlay.winfo_screenwidth() - overlay.winfo_reqwidth()) // 2)
-        overlay.geometry(f"+{x}+40")
-        overlay.lift()
-        overlay.focus_force()
+    def poll_overlay():
+        nonlocal overlay
+        if overlay is None or overlay.poll() is None:
+            return
+        finished, overlay = overlay, None
+        action = finished.communicate()[0].strip()
+        if overlay_dismissed:
+            return
+        if finished.returncode:
+            status.set(f"GSR overlay exited with code {finished.returncode}.")
+            show()
+        elif action == b"recordings":
+            open_editor()
+        elif action == b"settings":
+            show()
+        elif not busy and action in {b"toggle_record", b"toggle_replay", b"save_replay", b"save_short", b"save_long"}:
+            handle_hotkey(action.decode("ascii"))
 
     def handle_hotkey(action):
         if action == "toggle_overlay":
@@ -359,7 +358,7 @@ def capture_controls(library, *, background=False):
             else:
                 status.set("Replay is already active with this recording.")
         elif capture is not None:
-            save(60 if action == "save_short" else 300)
+            save(min(60, capture.seconds) if action == "save_short" else capture.seconds)
         else:
             status.set("Start replay or recording before saving a replay.")
 
@@ -444,7 +443,7 @@ def capture_controls(library, *, background=False):
                 close()
                 if not busy:
                     return
-            elif not busy and not closing:
+            elif not closing and (tray_action == "toggle_overlay" or not busy):
                 handle_hotkey(tray_action)
         try:
             action, value, error = results.get_nowait()
@@ -501,6 +500,9 @@ def capture_controls(library, *, background=False):
                     return
             update_buttons()
 
+        if not closing:
+            poll_overlay()
+
         if hotkeys and not closing:
             try:
                 action = hotkeys.events.get_nowait()
@@ -531,6 +533,9 @@ def capture_controls(library, *, background=False):
     try:
         root.mainloop()
     finally:
+        stop_overlay()
+        if overlay is not None:
+            overlay.communicate()
         if tray:
             tray.stop()
         if hotkeys:

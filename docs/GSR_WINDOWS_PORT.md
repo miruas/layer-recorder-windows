@@ -51,8 +51,7 @@ widget and page classes. The build takes the main page from the pinned,
 Layer-patched `Overlay.cpp` and maps its callbacks to Windows actions.
 The test loads upstream image resources, verifies the NVIDIA accent pixel,
 clicks the first action on Instant Replay, Record, Livestream and Recordings,
-and checks the header close button. It uses a hidden Win32 window. The
-callbacks currently terminate at the test harness.
+and checks the header close button in a hidden Win32 window.
 
 The same build produces `layer-gsr-overlay.exe`. The executable takes the
 GSR resource directory as its argument. It captures one frame of the cursor
@@ -60,5 +59,9 @@ monitor into memory before showing its borderless window, then draws the
 original GSR dim layer and controls over that frame. Run
 `tools/test-gsr-windows-overlay.ps1` after building to verify monitor coverage
 and Escape dismissal on the interactive Windows desktop. The backdrop is
-static while open. Tray and global hotkey integration, capture and Studio
-dispatch, and the settings pages still need integration.
+static while open. Build with `-OverlayDirectory build/native/windows-overlay-package/overlay`
+to stage the resources and runtime dependencies for the Windows packages.
+The Layer tray and Alt+Z launch that overlay. Record, Replay, Replay Save
+and Recordings dispatch to the existing Windows capture controller and Studio.
+The gear opens the Windows controls. Native GSR settings, pause, livestream
+and screenshot actions still need integration.

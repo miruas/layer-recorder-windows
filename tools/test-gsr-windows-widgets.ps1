@@ -1,4 +1,7 @@
-param([string]$Toolchain = 'C:/msys64/ucrt64/bin')
+param(
+    [string]$Toolchain = 'C:/msys64/ucrt64/bin',
+    [string]$OverlayDirectory = ''
+)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root 'build/native/gsr-ui/source'
@@ -51,3 +54,35 @@ if ($LASTEXITCODE -ne 0) { throw "GSR widget test failed with exit code $LASTEXI
 $overlay = Join-Path $build 'layer-gsr-overlay.exe'
 & $cxx -std=c++17 -O2 -municode -mwindows @includes "$port/overlay_main.cpp" @objects @libs @windowsLibs -o $overlay
 if ($LASTEXITCODE -ne 0) { throw 'Could not link the native GSR overlay.' }
+
+if ($OverlayDirectory) {
+    $resources = Join-Path $OverlayDirectory 'resources'
+    New-Item -ItemType Directory -Force -Path $resources | Out-Null
+    Copy-Item -LiteralPath $overlay -Destination $OverlayDirectory -Force
+    Copy-Item -LiteralPath "$source/images","$source/translations" -Destination $resources -Recurse -Force
+    $toolchainRoot = Split-Path -Parent $Toolchain
+    Copy-Item -LiteralPath "$toolchainRoot/etc/fonts" -Destination $resources -Recurse -Force
+    foreach ($component in @{ 'gsr-ui' = $source; mglpp = $pp; mgl = $mgl }.GetEnumerator()) {
+        $archive = Join-Path $OverlayDirectory "$($component.Key)-source.zip"
+        & git -c core.longpaths=true -C $component.Value archive --format=zip "--prefix=$($component.Key)/" -o ([IO.Path]::GetFullPath($archive)) HEAD
+        if ($LASTEXITCODE -ne 0) { throw "Could not archive $($component.Key) source." }
+    }
+
+    $objdump = Join-Path $Toolchain 'objdump.exe'
+    $pending = [System.Collections.Generic.Queue[string]]::new()
+    $copied = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $pending.Enqueue($overlay)
+    while ($pending.Count) {
+        $imports = & $objdump -p $pending.Dequeue()
+        if ($LASTEXITCODE -ne 0) { throw 'Could not inspect native overlay dependencies.' }
+        foreach ($line in $imports) {
+            if ($line -notmatch 'DLL Name:\s+(\S+\.dll)$') { continue }
+            $dll = $Matches[1]
+            $file = Join-Path $Toolchain $dll
+            if ((Test-Path -LiteralPath $file) -and $copied.Add($dll)) {
+                Copy-Item -LiteralPath $file -Destination $OverlayDirectory -Force
+                $pending.Enqueue($file)
+            }
+        }
+    }
+}

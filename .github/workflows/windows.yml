@@ -45,12 +45,23 @@ jobs:
       - name: Build Layer Studio for distribution
         if: github.event_name == 'push'
         run: ./tools/build-windows.ps1
+      - name: Install the native overlay toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          location: '${{ runner.temp }}/layer-msys2'
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-pango
+        id: overlay-toolchain
+      - name: Build and test the original GSR overlay
+        run: |
+          ./tools/test-gsr-windows-widgets.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay
       - name: Package the Windows build
         if: github.event_name == 'push'
         run: |
           $package = Join-Path $env:RUNNER_TEMP 'Layer-Windows-x64'
           New-Item -ItemType Directory -Path "$package/bin", "$package/docs", "$package/tools" | Out-Null
           Copy-Item -Recurse katman, licenses -Destination $package
+          Copy-Item -Recurse build/native/windows-overlay-package/overlay -Destination $package
           Copy-Item pyproject.toml, MANIFEST.in, README.md, LICENSE, NOTICE.md, Layer.cmd -Destination $package
           Copy-Item docs/WINDOWS.md -Destination "$package/docs"
           Copy-Item tools/install-windows.ps1 -Destination "$package/tools"

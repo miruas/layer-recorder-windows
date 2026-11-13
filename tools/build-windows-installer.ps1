@@ -25,6 +25,7 @@ Copy-Item -Recurse (Join-Path $root 'katman'),(Join-Path $root 'licenses') -Dest
 Copy-Item (Join-Path $root 'LICENSE'),(Join-Path $root 'NOTICE.md') -Destination $Stage -Force
 Copy-Item (Join-Path $root 'bin/layer-studio.exe'),(Join-Path $root 'bin/layer-capture.exe') -Destination "$Stage/bin" -Force
 Copy-Item (Join-Path $root 'bin/layer.exe') -Destination $Stage -Force
+Copy-Item -LiteralPath (Join-Path $root 'build/native/windows-overlay-package/overlay') -Destination $Stage -Recurse -Force
 & git -C $root archive --format=zip --prefix=layer-recorder-source/ -o "$Stage/Layer-source.zip" HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Could not archive the corresponding source.' }
 & $Compiler "/DStage=$Stage" "/DOutDir=$Output" (Join-Path $root 'packaging/windows/Layer.iss')

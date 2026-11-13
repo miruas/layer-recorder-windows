@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "front_page.hpp"
 #include "Theme.hpp"
+#include "Translation.hpp"
+#include "gui/DropdownButton.hpp"
 #include <mglpp/window/Window.hpp>
 #include <utility>
 
@@ -13,6 +15,20 @@ void WindowsFrontPage::resize(mgl::vec2i size) {
     window_size = size;
     get_theme().set_window_size(size);
     recreate_frontpage_ui_components();
+}
+
+void WindowsFrontPage::set_capture_state(bool recording, bool replay) {
+    auto &theme = get_theme();
+    record_dropdown_button_ptr->set_description(recording ? TR("Recording") : TR("Not recording"));
+    record_dropdown_button_ptr->set_activated(recording);
+    record_dropdown_button_ptr->set_item_label("start", recording ? TR("Stop and save") : TR("Start"));
+    record_dropdown_button_ptr->set_item_icon("start", recording ? &theme.stop_texture : &theme.play_texture);
+    replay_dropdown_button_ptr->set_description(replay ? TR("On") : TR("Off"));
+    replay_dropdown_button_ptr->set_activated(replay);
+    replay_dropdown_button_ptr->set_item_label("start", replay ? TR("Turn off") : TR("Turn on"));
+    replay_dropdown_button_ptr->set_item_icon("start", replay ? &theme.stop_texture : &theme.play_texture);
+    for (const auto *id : {"save", "save_1_min", "save_10_min"})
+        replay_dropdown_button_ptr->set_item_enabled(id, replay);
 }
 
 bool WindowsFrontPage::on_event(mgl::Event &event, mgl::Window &window) {
