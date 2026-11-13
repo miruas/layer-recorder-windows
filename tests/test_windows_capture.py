@@ -25,6 +25,7 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(args[args.index("-c:v") + 1], "h264_nvenc")
         self.assertEqual(args[args.index("-fps_mode") + 1], "cfr")
         self.assertNotIn("-vf", args)
+        self.assertEqual(args[args.index("-maxrate") + 1], "11M")
 
 
 def synthetic_video(display, fps, encoder):

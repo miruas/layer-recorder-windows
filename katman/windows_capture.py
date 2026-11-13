@@ -110,6 +110,10 @@ def desktop_duplication_command(display, fps):
     command[4:command.index("-an")] = [
         "-f", "lavfi", "-i", f"ddagrab=output_idx=0:framerate={fps}:output_fmt=bgra",
     ]
+    # Leave headroom in the default 512 MiB ring for five minutes of video,
+    # independent AAC tracks and container overhead.
+    rate = command.index("-b:v")
+    command[rate + 2:rate + 2] = ["-maxrate", "11M", "-bufsize", "11M"]
     start = command.index("-vf")
     command[start:command.index("-c:v")] = ["-fps_mode", "cfr", "-r", str(fps)]
     return command
