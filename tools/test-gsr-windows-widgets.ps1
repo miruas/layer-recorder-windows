@@ -24,7 +24,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Pango and GIO libraries are required.' }
 $cSources = @("$port/mgl_win32.c", "$port/mgl_files_win32.c", "$build/window_api.c", "$build/gl_loader.c",
     "$mgl/src/system/clock.c", "$mgl/src/system/utf8.c")
 $cSources += (Get-ChildItem "$mgl/src/graphics" -Filter '*.c').FullName
-$cppSources = @("$port/gsr_widget_smoke.cpp", "$port/config.cpp", "$build/key_names.cpp",
+$cppSources = @("$port/config.cpp", "$build/key_names.cpp",
     "$source/src/Config.cpp", "$source/src/Theme.cpp", "$source/src/Translation.cpp",
     "$port/front_page.cpp", $frontPage)
 $cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils', 'Page', 'PageStack', 'StaticPage',
@@ -43,7 +43,11 @@ foreach ($file in $cSources + $cppSources) {
     $objects += $object
 }
 $exe = Join-Path $build 'gsr-widget-win32-smoke.exe'
-& $cxx @objects @libs -o $exe -lopengl32 -lgdi32 -luser32 -lshell32 -lole32 -luuid
+$windowsLibs = @('-lopengl32', '-lgdi32', '-luser32', '-lshell32', '-lole32', '-luuid')
+& $cxx -std=c++17 -O2 @includes "$port/gsr_widget_smoke.cpp" @objects @libs @windowsLibs -o $exe
 if ($LASTEXITCODE -ne 0) { throw 'Could not link the GSR widget test.' }
 & $exe $source
 if ($LASTEXITCODE -ne 0) { throw "GSR widget test failed with exit code $LASTEXITCODE." }
+$overlay = Join-Path $build 'layer-gsr-overlay.exe'
+& $cxx -std=c++17 -O2 -municode -mwindows @includes "$port/overlay_main.cpp" @objects @libs @windowsLibs -o $overlay
+if ($LASTEXITCODE -ne 0) { throw 'Could not link the native GSR overlay.' }

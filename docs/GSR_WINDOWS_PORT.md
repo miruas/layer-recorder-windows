@@ -52,5 +52,13 @@ Layer-patched `Overlay.cpp` and maps its callbacks to Windows actions.
 The test loads upstream image resources, verifies the NVIDIA accent pixel,
 clicks the first action on Instant Replay, Record, Livestream and Recordings,
 and checks the header close button. It uses a hidden Win32 window. The
-callbacks currently terminate at the test harness. Desktop presentation,
-capture and Studio dispatch, and the settings pages still need integration.
+callbacks currently terminate at the test harness.
+
+The same build produces `layer-gsr-overlay.exe`. The executable takes the
+GSR resource directory as its argument. It captures one frame of the cursor
+monitor into memory before showing its borderless window, then draws the
+original GSR dim layer and controls over that frame. Run
+`tools/test-gsr-windows-overlay.ps1` after building to verify monitor coverage
+and Escape dismissal on the interactive Windows desktop. The backdrop is
+static while open. Tray and global hotkey integration, capture and Studio
+dispatch, and the settings pages still need integration.
