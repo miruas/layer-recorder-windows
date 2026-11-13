@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from .common import APP, ASSETS, SETTINGS_FILE
+from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import Capture, capture_binary, displays
 from .windows_hotkeys import GlobalHotkeys
 
@@ -211,21 +211,33 @@ def capture_controls(library, *, background=False):
     audio_refresh = ttk.Button(panel, text="Refresh audio", command=refresh_audio)
     audio_refresh.grid(row=11, column=2, sticky="e")
 
-    def toggle_hotkeys():
+    hotkey_file = CONFIG / "windows-shortcuts.json"
+    try:
+        enabled = json.loads(hotkey_file.read_text(encoding="utf-8")) is True
+    except (OSError, ValueError):
+        enabled = True
+
+    def apply_hotkeys():
         nonlocal hotkeys
-        if hotkeys:
-            hotkeys.close()
-            hotkeys = None
-        else:
+        if hotkey_setting.get():
             try:
                 hotkeys = GlobalHotkeys()
                 if hotkeys.conflicts:
                     status.set("Unavailable shortcuts: " + ", ".join(hotkeys.conflicts))
             except OSError as error:
-                hotkey_setting.set(False)
                 status.set(str(error))
+        elif hotkeys:
+            hotkeys.close()
+            hotkeys = None
 
-    hotkey_setting = tk.BooleanVar(value=False)
+    def toggle_hotkeys():
+        apply_hotkeys()
+        try:
+            atomic_json(hotkey_file, hotkey_setting.get())
+        except OSError as error:
+            status.set(f"Could not save shortcut preference: {error}")
+
+    hotkey_setting = tk.BooleanVar(value=enabled)
     ttk.Checkbutton(panel, text="Enable global shortcuts", variable=hotkey_setting,
                     command=toggle_hotkeys).grid(row=13, column=0, columnspan=3, sticky="w", pady=(8, 0))
     ttk.Label(panel, text="Ctrl+Alt+F8 Record  ·  F9 Replay  ·  F10 Save 1 min  ·  F11 Save 5 min",
@@ -459,6 +471,7 @@ def capture_controls(library, *, background=False):
         root.after(400, lambda: root.withdraw()
                    if tray_ready and tray_ready.is_set() and tray.visible else None)
     refresh()
+    apply_hotkeys()
     update_buttons()
     root.after(150, poll)
     root.after(200, lambda: refresh_audio() if not busy and capture is None else None)

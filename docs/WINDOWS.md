@@ -16,7 +16,7 @@ A selected display resumes after reconnecting or changing mode. Each capture gen
 
 Replay can save up to five minutes of completed fragments and uses a shared 512 MiB RAM budget. The effective history depends on bitrate and the number of sources. The recorder shows the available replay duration, encoded RAM use, and active video backend. Normal recordings keep replay available. The recorder window keeps the capture session alive.
 
-Enable **global shortcuts** to use these while Layer is in the background:
+Global shortcuts are enabled by default while Layer runs, including in the notification area. Change **Enable global shortcuts** in the recorder to save your preference:
 
 | Shortcut | Action |
 | --- | --- |
