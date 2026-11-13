@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
-import io
 import os
 from pathlib import Path
 import shutil
-import struct
 import tempfile
 import time
 import unittest
@@ -11,24 +9,11 @@ from unittest.mock import patch
 
 from katman.common import load_project, probe
 from katman.export import export_project
-from katman.windows_capture import Capture, Display, Fragment, ReplayBuffer, capture_command, read_boxes
+from katman.windows_capture import Capture, Display, capture_binary, capture_command
 from katman.windows_audio import AudioSource
 
 
 class ReplayTests(unittest.TestCase):
-    def test_replay_evicts_by_time_and_size(self):
-        ring = ReplayBuffer(2, 6)
-        for start in range(4):
-            ring.add(Fragment(start, b"a", b"b"))
-        self.assertEqual([f.start for f in ring.fragments], [1, 2, 3])
-        ring.add(Fragment(4, b"aaa", b"bb"))
-        self.assertEqual([f.start for f in ring.fragments], [4])
-        self.assertEqual(ring.bytes, 5)
-
-    def test_fragment_reader_rejects_partial_payload(self):
-        with self.assertRaisesRegex(ValueError, "Incomplete"):
-            list(read_boxes(io.BytesIO(struct.pack(">I4s", 10, b"mdat") + b"x")))
-
     def test_left_monitor_capture_uses_signed_origin(self):
         args = capture_command(Display("Left", -1280, -50, 1280, 720), 30, "libx264")
         self.assertEqual(args[args.index("-offset_x") + 1], "-1280")
@@ -49,16 +34,17 @@ def synthetic_audio(_source):
             "-movflags", "empty_moov+default_base_moof+skip_trailer", "-f", "mp4", "pipe:1"]
 
 
-def wait_fragments(test, track, count=1):
+def wait_fragments(test, capture, track, count=1):
     deadline = time.monotonic() + 20
-    while len(track.snapshot()[2]) < count:
-        if error := track.failure():
+    while capture._status()[track.id]["count"] < count:
+        if error := capture.failure():
             test.fail(error)
         test.assertLess(time.monotonic(), deadline, "Capture did not produce fragments")
         time.sleep(.1)
 
 
-@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+@unittest.skipUnless(capture_binary().is_file() and shutil.which("ffmpeg") and shutil.which("ffprobe"),
+                     "The Rust capture engine and FFmpeg are required")
 class ProjectTests(unittest.TestCase):
     def test_two_tracks_record_replay_and_export(self):
         monitor = Display("Primary", 0, 0, 96, 64, True)
@@ -69,13 +55,8 @@ class ProjectTests(unittest.TestCase):
             with patch("katman.windows_capture.capture_command", synthetic_video):
                 capture = Capture(library, [monitor, second], fps=10, seconds=3, record=True)
             try:
-                deadline = time.monotonic() + 20
-                while not all(track.snapshot()[2] and track.snapshot()[2][-1].start >= 2
-                              for track in capture.tracks):
-                    if error := capture.failure():
-                        self.fail(error)
-                    self.assertLess(time.monotonic(), deadline, "Capture did not produce fragments")
-                    time.sleep(.1)
+                for track in capture.tracks:
+                    wait_fragments(self, capture, track, 3)
                 path, replay = load_project(capture.save_replay(1.5))
                 self.assertAlmostEqual(replay["duration"], 1.5, places=2)
                 self.assertEqual(len(replay["sources"]), 2)
@@ -102,12 +83,12 @@ class ProjectTests(unittest.TestCase):
             capture = Capture(directory, [first], fps=10, seconds=10, record=True,
                               audio=[microphone], follow_application_audio=True)
             try:
-                wait_fragments(self, capture.active[first.key], 2)
+                wait_fragments(self, capture, capture.active[first.key], 2)
                 self.assertEqual(capture.reconcile([], [microphone, application]), 0)
                 self.assertTrue(capture.tracks[0].stopped)
                 self.assertEqual(capture.reconcile([changed], [microphone, application]), 1)
-                wait_fragments(self, capture.active[changed.key], 2)
-                wait_fragments(self, capture.active[application.key], 2)
+                wait_fragments(self, capture, capture.active[changed.key], 2)
+                wait_fragments(self, capture, capture.active[application.key], 2)
                 replay_path, replay = load_project(capture.save_replay(10))
                 self.assertEqual({s["width"] for s in replay["sources"] if s["type"] == "video"}, {96, 128})
                 self.assertEqual({s["kind"] for s in replay["sources"] if s["type"] == "audio"},

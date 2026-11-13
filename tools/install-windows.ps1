@@ -2,9 +2,10 @@ param([string]$Python = 'py')
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$editor = Join-Path $root 'bin/layer-studio.exe'
-if (!(Test-Path -LiteralPath $editor -PathType Leaf)) {
-    throw 'Layer Studio is missing. Run tools/build-windows.ps1 or download the Windows build from GitHub Actions.'
+foreach ($component in @('layer-studio', 'layer-capture')) {
+    if (!(Test-Path -LiteralPath (Join-Path $root "bin/$component.exe") -PathType Leaf)) {
+        throw "$component is missing. Run tools/build-windows.ps1 or download the Windows build from GitHub Actions."
+    }
 }
 foreach ($dependency in @('ffmpeg', 'ffprobe')) {
     if (!(Get-Command $dependency -ErrorAction SilentlyContinue)) {

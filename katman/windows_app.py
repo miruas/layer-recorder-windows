@@ -13,7 +13,7 @@ import threading
 import time
 
 from .common import APP, SETTINGS_FILE
-from .windows_capture import Capture, displays
+from .windows_capture import Capture, capture_binary, displays
 from .windows_hotkeys import GlobalHotkeys
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
@@ -436,9 +436,11 @@ def main():
                         capture_available = token in names
                     else:
                         available = [encoder for encoder in ENCODERS if encoder in names]
-            print(json.dumps({**paths, "gdigrab": capture_available, "encoders": available,
+            engine = capture_binary()
+            print(json.dumps({**paths, "capture_engine": str(engine) if engine.is_file() else None,
+                              "gdigrab": capture_available, "encoders": available,
                               "displays": [asdict(display) for display in displays()]}, indent=2))
-            if not all(paths.values()) or not capture_available or "libx264" not in available:
+            if not engine.is_file() or not all(paths.values()) or not capture_available or "libx264" not in available:
                 raise SystemExit(1)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(error, file=sys.stderr)

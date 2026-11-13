@@ -31,7 +31,13 @@ jobs:
           ffmpeg -version
           ffprobe -version
       - name: Test capture pipeline and project export
-        run: python -m unittest discover -s tests -p test_windows_capture.py -v
+        run: |
+          cargo test --locked --manifest-path native/windows-capture/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --locked --manifest-path native/windows-capture/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:LAYER_CAPTURE_BINARY = (Resolve-Path native/windows-capture/target/debug/layer-capture.exe).Path
+          python -m unittest discover -s tests -p test_windows_capture.py -v
       - name: Test native Studio
         run: |
           $env:LAYER_PYTHON = (Get-Command python).Source
@@ -48,7 +54,7 @@ jobs:
           Copy-Item pyproject.toml, MANIFEST.in, README.md, LICENSE, NOTICE.md, Layer.cmd -Destination $package
           Copy-Item docs/WINDOWS.md -Destination "$package/docs"
           Copy-Item tools/install-windows.ps1 -Destination "$package/tools"
-          Copy-Item bin/layer-studio.exe -Destination "$package/bin"
+          Copy-Item bin/layer-studio.exe, bin/layer-capture.exe -Destination "$package/bin"
           git archive --format=zip --prefix=layer-recorder-source/ -o "$package/Layer-source.zip" HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Could not package the corresponding source.' }
           Compress-Archive -Path $package -DestinationPath Layer-Windows-x64.zip

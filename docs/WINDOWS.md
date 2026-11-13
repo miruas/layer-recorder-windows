@@ -1,6 +1,6 @@
 # Layer Recorder for Windows
 
-The Windows port of [Layer Recorder](https://github.com/miruas/layer-recorder) saves each selected display and audio source as independent media in a version 1 `project.katman`. Replay holds encoded fragments in RAM while normal recordings write their own media.
+The Windows port of [Layer Recorder](https://github.com/miruas/layer-recorder) saves each selected display and audio source as independent media in a version 1 `project.katman`. A Rust capture engine supervises the producers, keeps encoded replay fragments in RAM and writes normal recordings. FFmpeg encodes display tracks, and WASAPI supplies audio.
 
 ## Install
 

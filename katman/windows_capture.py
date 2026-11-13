@@ -6,18 +6,18 @@ from ctypes import wintypes
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+import json
+import os
 import shutil
-import struct
 import subprocess
 import tempfile
-import threading
 import time
 import uuid
 
-from .common import atomic_json, probe
+from .common import APP, atomic_json, probe
 
 TIMESCALE = 90_000
-MAX_BOX_BYTES = 64 * 1024 * 1024
+
 
 
 @dataclass(frozen=True)
@@ -103,199 +103,56 @@ def capture_command(display, fps, encoder):
             "empty_moov+default_base_moof+frag_keyframe+skip_trailer", "-f", "mp4", "pipe:1"]
 
 
-def read_boxes(stream):
-    while header := stream.read(8):
-        if len(header) != 8:
-            raise ValueError("Incomplete MP4 box header.")
-        size, kind = struct.unpack(">I4s", header)
-        if not 8 <= size <= MAX_BOX_BYTES:
-            raise ValueError(f"Unsupported MP4 box size ({size} bytes).")
-        data = stream.read(size - 8)
-        if len(data) != size - 8:
-            raise ValueError("Incomplete MP4 box.")
-        yield kind, header + data
+def capture_binary():
+    return Path(os.environ.get("LAYER_CAPTURE_BINARY", APP / "bin/layer-capture.exe"))
 
 
-def fragment_timestamp(box):
-    def children(data):
-        position = 0
-        while position + 8 <= len(data):
-            size, kind = struct.unpack_from(">I4s", data, position)
-            if size < 8 or position + size > len(data):
-                raise ValueError("Invalid fragmented MP4 structure.")
-            yield kind, position + 8, data[position + 8:position + size]
-            position += size
+class CaptureEngine:
+    def __init__(self, seconds, memory_bytes):
+        binary = capture_binary()
+        if not binary.is_file():
+            raise RuntimeError("Layer capture engine is missing. Run tools/build-windows.ps1 or install the Windows package.")
+        self.process = subprocess.Popen([binary, str(seconds), str(memory_bytes)],
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        text=True, encoding="utf-8",
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
-    for kind, track_offset, track in children(box[8:]):
-        if kind == b"traf":
-            for child, offset, body in children(track):
-                if child == b"tfdt" and len(body) >= 8:
-                    fmt = ">Q" if body[0] == 1 else ">I"
-                    return fmt, 8 + track_offset + offset + 4, struct.unpack_from(fmt, body, 4)[0]
-    raise ValueError("MP4 fragment is missing its decode timestamp.")
-
-
-@dataclass(frozen=True)
-class Fragment:
-    start: float
-    moof: bytes
-    mdat: bytes
-
-    @property
-    def size(self):
-        return len(self.moof) + len(self.mdat)
-
-
-class ReplayBuffer:
-    def __init__(self, seconds, byte_limit):
-        self.seconds = seconds
-        self.byte_limit = byte_limit
-        self.fragments = deque()
-        self.bytes = 0
-
-    def add(self, fragment):
-        self.fragments.append(fragment)
-        self.bytes += fragment.size
-        while (self.fragments and
-               (self.bytes > self.byte_limit or
-                (len(self.fragments) > 1 and
-                 self.fragments[1].start <= fragment.start - self.seconds))):
-            self.evict()
-
-    def evict(self):
-        self.bytes -= self.fragments.popleft().size
-
-
-class ReplayBudget:
-    def __init__(self, limit):
-        self.limit = limit
-        self.lock = threading.RLock()
-        self.tracks = []
-
-    def add(self, track, fragment):
-        with self.lock:
-            track.replay.add(fragment)
-            self._trim(time.monotonic())
-
-    def _trim(self, now):
-        candidates = []
-        total = 0
-        for index, track in enumerate(self.tracks):
-            ring = track.replay
-            while (ring.fragments and
-                   track.started + ring.fragments[0].start + 1 < now - ring.seconds):
-                ring.evict()
-            if ring.fragments:
-                candidates.append((track.started + ring.fragments[0].start, index, track))
-                total += ring.bytes
-        while total > self.limit:
-            _, _, track = min(candidates)
-            ring = track.replay
-            total -= ring.fragments[0].size
-            ring.evict()
-            candidates = [(item.started + item.replay.fragments[0].start, index, item)
-                          for _, index, item in candidates if item.replay.fragments]
-
-
-class Track:
-    def __init__(self, source, command, fps, seconds, budget, media=None, timescale=TIMESCALE):
-        self.source = source
-        self.media = media
-        self.timescale = timescale
-        self.kind = "video" if isinstance(source, Display) else "audio"
-        self.command = command
-        self.fps = fps
-        self.budget = budget
-        self.replay = ReplayBuffer(seconds, budget.limit)
-        self.recording = media.open("wb") if media else None
-        self.lock = budget.lock
-        self.init = []
-        self.started = None
-        self.error = None
-        self.process = None
-        self.stopped = False
-
-    def start(self):
-        self.log = deque(maxlen=8)
-        self.launched = time.monotonic()
-        self.process = subprocess.Popen(
-            self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        self.log_reader = threading.Thread(target=self.read_log, daemon=True)
-        self.log_reader.start()
-        self.reader = threading.Thread(target=self.read, daemon=True)
-        self.reader.start()
-
-    def read_log(self):
-        with self.process.stderr as stream:
-            while block := stream.read1(4096):
-                with self.lock:
-                    self.log.append(block)
-
-    def read(self):
-        pending = None
+    def request(self, op, **args):
         try:
-            for kind, box in read_boxes(self.process.stdout):
-                if kind == b"moof":
-                    pending = box
-                elif kind == b"mdat" and pending is not None:
-                    fragment = Fragment(fragment_timestamp(pending)[2] / self.timescale, pending, box)
-                    with self.lock:
-                        if self.started is None:
-                            # The first complete fragment usually flushes after one second.
-                            self.started = max(self.launched, time.monotonic() - 1.0)
-                        self.budget.add(self, fragment)
-                    pending = None
-                elif kind in {b"ftyp", b"moov"}:
-                    with self.lock:
-                        self.init.append(box)
-                if self.recording is not None:
-                    self.recording.write(box)
-        except (OSError, ValueError, struct.error) as error:
-            self.error = str(error)
-            if self.process.poll() is None:
-                self.process.kill()
+            self.process.stdin.write(json.dumps({"op": op, **args}) + "\n")
+            self.process.stdin.flush()
+            raw = self.process.stdout.readline()
+        except OSError as error:
+            raise RuntimeError("Layer capture engine disconnected.") from error
+        if not raw:
+            raise RuntimeError("Layer capture engine stopped unexpectedly.")
+        reply = json.loads(raw)
+        if not reply["ok"]:
+            raise RuntimeError(reply["error"])
+        return reply["data"]
+
+    def close(self):
+        self.process.stdin.close()
+        try:
+            self.process.wait(timeout=12)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
         finally:
             self.process.stdout.close()
 
-    def failure(self):
-        code = self.process.poll()
-        if self.error:
-            return self.error
-        if code is not None and code != 0:
-            with self.lock:
-                details = b"".join(self.log).decode("utf-8", errors="replace").strip()
-            return details or f"FFmpeg exited with {code}."
-        return None
 
-    def stop(self):
-        if self.stopped:
-            return self.error
-        self.stopped = True
-        try:
-            if self.process.poll() is None:
-                try:
-                    self.process.stdin.write(b"q\n")
-                    self.process.stdin.flush()
-                except OSError:
-                    pass
-                try:
-                    self.process.wait(timeout=8)
-                except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait()
-            self.reader.join()
-            self.log_reader.join()
-            self.error = self.failure()
-            return self.error
-        finally:
-            self.process.stdin.close()
-            if self.recording is not None:
-                self.recording.close()
+@dataclass
+class Track:
+    id: int
+    source: object
+    fps: int
+    media: Path | None
+    stopped: bool = False
 
-    def snapshot(self):
-        with self.lock:
-            return self.started, tuple(self.init), tuple(self.replay.fragments)
+    @property
+    def kind(self):
+        return "video" if isinstance(self.source, Display) else "audio"
 
 
 def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
@@ -359,24 +216,25 @@ class Capture:
             raise RuntimeError("Install FFmpeg and add both ffmpeg and ffprobe to PATH.")
         self.library = Path(library).expanduser().resolve()
         self.library.mkdir(parents=True, exist_ok=True)
-        self.record_folder = Path(tempfile.mkdtemp(prefix="Layer-recording-", dir=self.library)) if record else None
+        self.record_folder = None
         self.fps = fps
         self.encoder = encoder
         self.seconds = seconds
-        self.budget = ReplayBudget(memory_mb * 1024**2)
+        self.engine = CaptureEngine(seconds, memory_mb * 1024**2)
         self.selected = {display.key for display in selected}
         self.audio = {source.key: source for source in audio}
         self.follow_displays = follow_displays
         self.follow_application_audio = follow_application_audio
-        self.tracks = self.budget.tracks
+        self.tracks = []
         self.active = {}
         self.serial = 0
         self.retry_at = {}
         self.warnings = deque(maxlen=20)
         self.final_project = None
-        if self.record_folder:
-            (self.record_folder / "media").mkdir()
         try:
+            if record:
+                self.record_folder = Path(tempfile.mkdtemp(prefix="Layer-recording-", dir=self.library))
+                (self.record_folder / "media").mkdir()
             for source in selected:
                 self._start_track(source)
             for source in audio:
@@ -397,19 +255,15 @@ class Capture:
             command = capture_audio_command(source)
             stem, timescale = "audio", AUDIO_TIMESCALE
         path = self.record_folder / "media" / f"{stem}-{self.serial}.mp4" if self.record_folder else None
-        track = Track(source, command, self.fps, self.seconds, self.budget, path, timescale)
-        with self.budget.lock:
-            self.tracks.append(track)
         try:
-            track.start()
-        except OSError:
-            with self.budget.lock:
-                self.tracks.remove(track)
-            if track.recording:
-                track.recording.close()
+            self.engine.request("start", id=self.serial, command=command, scale=timescale,
+                                media=str(path) if path else None)
+        except (OSError, RuntimeError):
             if path:
                 path.unlink(missing_ok=True)
             raise
+        track = Track(self.serial, source, self.fps, path)
+        self.tracks.append(track)
         self.active[source.key] = track
 
     def _try_start(self, source):
@@ -421,7 +275,8 @@ class Capture:
 
     def _retire(self, key):
         track = self.active.pop(key)
-        error = track.stop()
+        track.stopped = True
+        error = self.engine.request("stop", id=track.id)
         if error:
             self.warnings.append(f"{track.source.name}: {error}")
 
@@ -440,7 +295,7 @@ class Capture:
         now = time.monotonic()
         for key, track in tuple(self.active.items()):
             source = desired.get(key)
-            if source is None or source != track.source or track.process.poll() is not None:
+            if source is None or source != track.source or self.engine.request("failure", id=track.id):
                 self._retire(key)
                 if source == track.source:
                     self.retry_at[key] = now + 5
@@ -448,28 +303,39 @@ class Capture:
             if key not in self.active and now >= self.retry_at.get(key, 0):
                 self._try_start(source)
         self.retry_at = {key: value for key, value in self.retry_at.items() if key in desired}
-        self._prune(time.monotonic())
+        self._prune()
         return sum(track.kind == "video" for track in self.active.values())
 
-    def _prune(self, now):
-        with self.budget.lock:
-            self.budget._trim(now)
-            if not self.record_folder:
-                self.tracks[:] = [track for track in self.tracks
-                                  if not track.stopped or track.replay.fragments]
+    def _status(self):
+        return {row["id"]: row for row in self.engine.request("status")["tracks"]}
+
+    def _prune(self):
+        if self.record_folder:
+            return
+        state = self._status()
+        for track in self.tracks[:]:
+            if track.stopped and not state[track.id]["count"]:
+                self.engine.request("forget", id=track.id)
+                self.tracks.remove(track)
 
     def failure(self):
         for track in self.active.values():
-            error = track.failure()
-            if error:
+            if error := self.engine.request("failure", id=track.id):
                 return f"{track.source.name}: {error}"
-            if track.process.poll() is not None:
-                return f"{track.source.name}: capture stopped unexpectedly."
         return None
 
-    def stop(self):
+    def _stop_tracks(self):
         for key in tuple(self.active):
-            self._retire(key)
+            try:
+                self._retire(key)
+            except (OSError, RuntimeError) as error:
+                self.warnings.append(str(error))
+
+    def stop(self):
+        self._stop_tracks()
+        if self.engine:
+            self.engine.close()
+            self.engine = None
         return list(self.warnings)
 
     def finish_recording(self):
@@ -477,56 +343,44 @@ class Capture:
             raise RuntimeError("No ordinary recording is active.")
         if self.final_project:
             return self.final_project
-        self.stop()
-        tracks = [(track, track.media, start) for track in self.tracks
-                  if (start := track.snapshot()[0]) is not None]
-        if not tracks:
-            raise RuntimeError(f"No media was completed. Recording folder: {self.record_folder}. "
-                               + " ".join(self.warnings))
-        path = self.record_folder / "project.katman"
-        atomic_json(path, project_data(self.record_folder, "recording", tracks,
-                                       warnings=self.warnings))
-        self.final_project = path
-        return path
+        self._stop_tracks()
+        try:
+            state = self._status()
+            tracks = [(track, track.media, state[track.id]["started"]) for track in self.tracks
+                      if state[track.id]["started"] is not None]
+            if not tracks:
+                raise RuntimeError(f"No media was completed. Recording folder: {self.record_folder}. "
+                                   + " ".join(self.warnings))
+            path = self.record_folder / "project.katman"
+            atomic_json(path, project_data(self.record_folder, "recording", tracks,
+                                           warnings=self.warnings))
+            self.final_project = path
+            return path
+        finally:
+            self.stop()
 
     def save_replay(self, seconds):
         if not 0 < seconds <= self.seconds:
             raise ValueError("Replay duration must fit inside the configured buffer.")
-        with self.budget.lock:
-            self._prune(time.monotonic())
-            snapshots = []
-            for track in self.tracks:
-                start, init, fragments = track.snapshot()
-                if start is not None and init and fragments:
-                    snapshots.append((track, start, init, fragments))
+        state = self._status()
+        snapshots = [(track, state[track.id]) for track in self.tracks if state[track.id]["count"]]
         if not snapshots:
             raise RuntimeError("Replay is still warming up, or the memory budget is too small.")
-        bounds = [(start + fragments[-1].start + 1, track) for track, start, _, fragments in snapshots]
+        bounds = [(row["started"] + row["last"] + 1, track) for track, row in snapshots]
         live_video = [end for end, track in bounds if not track.stopped and track.kind == "video"]
         end = min(live_video) if live_video else max(end for end, _ in bounds)
-        cutoff = max(min(start + fragments[0].start for _, start, _, fragments in snapshots), end - seconds)
+        cutoff = max(min(row["started"] + row["first"] for _, row in snapshots), end - seconds)
         folder = Path(tempfile.mkdtemp(prefix="Layer-replay-", dir=self.library))
         try:
             (folder / "media").mkdir()
             tracks = []
-            for i, (track, start, init, fragments) in enumerate(snapshots, 1):
-                if start + fragments[-1].start + 1 <= cutoff or start + fragments[0].start >= end:
-                    continue
-                first = max((j for j, frag in enumerate(fragments) if start + frag.start <= cutoff),
-                            default=0)
-                media = folder / "media" / f"{track.kind}-{i}.mp4"
-                with media.open("wb") as output:
-                    output.writelines(init)
-                    base = fragment_timestamp(fragments[first].moof)[2]
-                    for fragment in fragments[first:]:
-                        if start + fragment.start >= end:
-                            break
-                        fmt, position, timestamp = fragment_timestamp(fragment.moof)
-                        moof = bytearray(fragment.moof)
-                        struct.pack_into(fmt, moof, position, timestamp - base)
-                        output.write(moof)
-                        output.write(fragment.mdat)
-                tracks.append((track, media, start + fragments[first].start))
+            for track, row in snapshots:
+                start = row["started"]
+                media = folder / "media" / f"{track.kind}-{track.id}.mp4"
+                first = self.engine.request("snapshot", id=track.id, path=str(media),
+                                            **{"from": cutoff - start, "to": end - start})
+                if first is not None:
+                    tracks.append((track, media, start + first))
             path = folder / "project.katman"
             atomic_json(path, project_data(folder, "replay", tracks, cutoff, end, self.warnings))
             return path

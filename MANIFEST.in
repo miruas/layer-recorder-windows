@@ -22,3 +22,6 @@ recursive-include native/recorder/src *.rs
 include native/editor/Cargo.toml native/editor/Cargo.lock
 recursive-include native/editor/src *.rs
 recursive-include packaging *.txt *.xml *.desktop *.Dockerfile *.sh
+
+include native/windows-capture/Cargo.toml native/windows-capture/Cargo.lock
+recursive-include native/windows-capture/src *.rs

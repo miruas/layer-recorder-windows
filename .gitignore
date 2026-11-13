@@ -41,3 +41,4 @@ settings.json
 /native/recorder/target/
 /native/editor/target/
 .layer-python-env
+/native/windows-capture/target/
