@@ -11,7 +11,14 @@ foreach ($dependency in @('ffmpeg', 'ffprobe')) {
         throw 'Install FFmpeg with winget install --id Gyan.FFmpeg --exact, then open a new PowerShell window.'
     }
 }
-$venv = Join-Path $root '.venv'
+$rootBytes = [Text.Encoding]::UTF8.GetBytes($root.ToUpperInvariant())
+$hasher = [Security.Cryptography.SHA256]::Create()
+try {
+    $identity = [BitConverter]::ToString($hasher.ComputeHash($rootBytes)).Replace('-', '').Substring(0, 12)
+} finally {
+    $hasher.Dispose()
+}
+$venv = Join-Path $env:LOCALAPPDATA "Layer/env/$identity"
 $venvPython = Join-Path $venv 'Scripts/python.exe'
 if (!(Test-Path -LiteralPath $venvPython -PathType Leaf)) {
     $version = if ($Python -eq 'py') { @('-3.12') } else { @() }
@@ -22,4 +29,5 @@ if (!(Test-Path -LiteralPath $venvPython -PathType Leaf)) {
 if ($LASTEXITCODE -ne 0) { throw 'Layer installation failed.' }
 & $venvPython -m katman doctor
 if ($LASTEXITCODE -ne 0) { throw 'Layer could not verify the capture environment.' }
-Write-Output "Start Layer with: & '$(Join-Path $venv 'Scripts/layer.exe')'"
+Set-Content -LiteralPath (Join-Path $root '.layer-python-env') -Value $identity -Encoding ascii
+Write-Output "Start Layer with .\Layer.cmd"

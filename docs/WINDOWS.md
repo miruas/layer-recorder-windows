@@ -18,7 +18,7 @@ Open a new PowerShell window so it sees the updated PATH. Download **Layer-Windo
 .\Layer.cmd
 ```
 
-The installer creates a Python environment inside the extracted directory. Keep this directory in place after setup.
+The installer creates a Python environment under local app data. If you move the extracted directory, rerun the installer.
 
 ## Capture and replay
 
@@ -44,7 +44,7 @@ Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` dire
 Use **Export project…** or run:
 
 ```powershell
-.\.venv\Scripts\layer.exe export 'C:\Clips\My project\project.katman' --output 'C:\Clips\My video.mp4'
+.\Layer.cmd export 'C:\Clips\My project\project.katman' --output 'C:\Clips\My video.mp4'
 ```
 
 ## Build from source
@@ -56,7 +56,7 @@ git clone https://github.com/miruas/layer-recorder-windows.git
 cd layer-recorder-windows
 .\tools\build-windows.ps1
 .\tools\install-windows.ps1
-.\.venv\Scripts\layer.exe editor
+.\Layer.cmd editor
 ```
 
 ## Compatibility
