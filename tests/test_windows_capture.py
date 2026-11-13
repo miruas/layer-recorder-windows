@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from katman.common import load_project, probe
 from katman.export import export_project
-from katman.windows_capture import Capture, Display, capture_binary, capture_command
+from katman.windows_capture import Capture, Display, capture_binary, capture_command, desktop_duplication_command
 from katman.windows_audio import AudioSource
 
 
@@ -18,6 +18,13 @@ class ReplayTests(unittest.TestCase):
         args = capture_command(Display("Left", -1280, -50, 1280, 720), 30, "libx264")
         self.assertEqual(args[args.index("-offset_x") + 1], "-1280")
         self.assertEqual(args[args.index("-offset_y") + 1], "-50")
+
+    def test_desktop_duplication_uses_gpu_frames_and_constant_output_rate(self):
+        args = desktop_duplication_command(Display("Primary", 0, 0, 1920, 1080, True), 60)
+        self.assertIn("ddagrab=output_idx=0:framerate=60:output_fmt=bgra", args)
+        self.assertEqual(args[args.index("-c:v") + 1], "h264_nvenc")
+        self.assertEqual(args[args.index("-fps_mode") + 1], "cfr")
+        self.assertNotIn("-vf", args)
 
 
 def synthetic_video(display, fps, encoder):
@@ -69,6 +76,29 @@ class ProjectTests(unittest.TestCase):
                 _, recording = load_project(capture.finish_recording())
                 self.assertEqual(len(recording["sources"]), 2)
                 self.assertGreater(recording["duration"], 2)
+            finally:
+                capture.stop()
+
+    def test_nvenc_falls_back_when_desktop_duplication_fails(self):
+        import sys
+        monitor = Display("Primary", 0, 0, 96, 64, True)
+        with (tempfile.TemporaryDirectory() as directory,
+              patch("katman.windows_capture.displays", return_value=[monitor]),
+              patch("katman.windows_capture.desktop_duplication_command",
+                    return_value=[sys.executable, "-c", "raise SystemExit(1)"]),
+              patch("katman.windows_capture.capture_command",
+                    side_effect=lambda display, fps, _: synthetic_video(display, fps, "libx264"))):
+            capture = Capture(directory, [monitor], fps=10, encoder="h264_nvenc")
+            try:
+                deadline = time.monotonic() + 15
+                while capture.active[monitor.key].backend == "ddagrab":
+                    self.assertLess(time.monotonic(), deadline)
+                    capture.reconcile([monitor])
+                    time.sleep(.1)
+                wait_fragments(self, capture, capture.active[monitor.key])
+                _, replay = load_project(capture.save_replay(1))
+                self.assertEqual(replay["sources"][0]["backend"], "gdigrab")
+                self.assertTrue(any("Desktop Duplication failed" in w for w in replay["warnings"]))
             finally:
                 capture.stop()
 

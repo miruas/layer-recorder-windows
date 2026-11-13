@@ -103,6 +103,18 @@ def capture_command(display, fps, encoder):
             "empty_moov+default_base_moof+frag_keyframe+skip_trailer", "-f", "mp4", "pipe:1"]
 
 
+def desktop_duplication_command(display, fps):
+    command = capture_command(display, fps, "h264_nvenc")
+    # Pass D3D11 surfaces directly to NVENC. CFR normalizes DXGI timestamps
+    # to one frame per output tick before the fragmented MP4 muxer.
+    command[4:command.index("-an")] = [
+        "-f", "lavfi", "-i", f"ddagrab=output_idx=0:framerate={fps}:output_fmt=bgra",
+    ]
+    start = command.index("-vf")
+    command[start:command.index("-c:v")] = ["-fps_mode", "cfr", "-r", str(fps)]
+    return command
+
+
 def capture_binary():
     return Path(os.environ.get("LAYER_CAPTURE_BINARY", APP / "bin/layer-capture.exe"))
 
@@ -149,6 +161,7 @@ class Track:
     fps: int
     media: Path | None
     stopped: bool = False
+    backend: str = "gdigrab"
 
     @property
     def kind(self):
@@ -171,7 +184,7 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
         if track.kind == "video":
             display = track.source
             metadata = {"name": display.name, "x": display.x, "y": display.y,
-                        "backend": "gdigrab", "logical_width": display.width,
+                        "backend": track.backend, "logical_width": display.width,
                         "logical_height": display.height, "width": stream["width"],
                         "height": stream["height"]}
         else:
@@ -231,6 +244,13 @@ class Capture:
         self.retry_at = {}
         self.warnings = deque(maxlen=20)
         self.final_project = None
+        self.duplication_failed = set()
+        self.single_display = None
+        if encoder == "h264_nvenc":
+            try:
+                self._update_duplication_layout(displays())
+            except OSError:
+                pass
         try:
             if record:
                 self.record_folder = Path(tempfile.mkdtemp(prefix="Layer-recording-", dir=self.library))
@@ -245,15 +265,27 @@ class Capture:
                 shutil.rmtree(self.record_folder)
             raise
 
+    def _update_duplication_layout(self, current):
+        self.single_display = current[0] if len(current) == 1 and current[0].primary else None
+
+    def _backend(self, source):
+        if (self.encoder == "h264_nvenc" and source == self.single_display and
+                source.key not in self.duplication_failed and source.width % 2 == source.height % 2 == 0):
+            return "ddagrab"
+        return "gdigrab"
+
     def _start_track(self, source):
         self.serial += 1
         if isinstance(source, Display):
-            command = capture_command(source, self.fps, self.encoder)
+            backend = self._backend(source)
+            command = (desktop_duplication_command(source, self.fps) if backend == "ddagrab"
+                       else capture_command(source, self.fps, self.encoder))
             stem, timescale = "display", TIMESCALE
         else:
             from .windows_audio import AUDIO_TIMESCALE, capture_audio_command
             command = capture_audio_command(source)
             stem, timescale = "audio", AUDIO_TIMESCALE
+            backend = "wasapi"
         path = self.record_folder / "media" / f"{stem}-{self.serial}.mp4" if self.record_folder else None
         try:
             self.engine.request("start", id=self.serial, command=command, scale=timescale,
@@ -262,7 +294,7 @@ class Capture:
             if path:
                 path.unlink(missing_ok=True)
             raise
-        track = Track(self.serial, source, self.fps, path)
+        track = Track(self.serial, source, self.fps, path, backend=backend)
         self.tracks.append(track)
         self.active[source.key] = track
 
@@ -282,6 +314,7 @@ class Capture:
 
     def reconcile(self, current, current_audio=None):
         """Reconcile device generations on the capture-control worker."""
+        self._update_duplication_layout(current)
         desired = {display.key: display for display in current
                    if self.follow_displays or display.key in self.selected}
         if current_audio is None:
@@ -295,9 +328,15 @@ class Capture:
         now = time.monotonic()
         for key, track in tuple(self.active.items()):
             source = desired.get(key)
-            if source is None or source != track.source or self.engine.request("failure", id=track.id):
+            failure = self.engine.request("failure", id=track.id)
+            if failure and track.backend == "ddagrab" and source == track.source:
+                self.duplication_failed.add(key)
+                self.warnings.append(f"{source.name}: Desktop Duplication failed. Using GDI with NVENC.")
                 self._retire(key)
-                if source == track.source:
+            elif (source != track.source or failure or
+                  (track.kind == "video" and track.backend != self._backend(track.source))):
+                self._retire(key)
+                if failure and source == track.source:
                     self.retry_at[key] = now + 5
         for key, source in desired.items():
             if key not in self.active and now >= self.retry_at.get(key, 0):
