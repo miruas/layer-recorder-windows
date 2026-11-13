@@ -50,6 +50,7 @@ def create_tray(events, icon_file):
     icon = Icon("LayerRecorder", image, "Layer Recorder", Menu(
         item("Open Layer", "show", True),
         item("Open Studio", "editor"),
+        item("Toggle overlay", "toggle_overlay"),
         Menu.SEPARATOR,
         item("Start or stop recording", "toggle_record"),
         item("Start or stop replay", "toggle_replay"),

@@ -20,10 +20,13 @@ Global shortcuts are enabled by default while Layer runs, including in the notif
 
 | Shortcut | Action |
 | --- | --- |
+| Alt+Z | Open or close the recording overlay |
 | Ctrl+Alt+F8 | Start or stop normal recording |
 | Ctrl+Alt+F9 | Start or stop replay |
 | Ctrl+Alt+F10 | Save up to the last minute |
 | Ctrl+Alt+F11 | Save up to the last five minutes |
+
+The overlay opens above the desktop and borderless windows. Exclusive fullscreen applications control their own display mode. Use the global recording and replay shortcuts in that mode. Another application may already own Alt+Z, in which case Layer reports the conflict and the tray menu can still open the panel.
 
 ## Edit and export
 

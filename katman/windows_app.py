@@ -108,6 +108,7 @@ def capture_controls(library, *, background=False):
     last_audio_inventory = None
     capture = None
     mode = None
+    overlay = None
     hotkeys = None
     next_inventory = 0.0
     next_audio_inventory = 0.0
@@ -293,8 +294,57 @@ def capture_controls(library, *, background=False):
         status.set("Saving replay…")
         submit("save", lambda: capture.save_replay(seconds))
 
+    def toggle_overlay():
+        nonlocal overlay
+        if overlay is not None and overlay.winfo_exists():
+            overlay.destroy()
+            overlay = None
+            return
+        overlay = tk.Toplevel(root)
+        overlay.title("Layer Overlay")
+        overlay.attributes("-topmost", True)
+        overlay.resizable(False, False)
+        overlay.bind("<Escape>", lambda _event: toggle_overlay())
+        box = ttk.Frame(overlay, padding=16)
+        box.pack(fill="both", expand=True)
+        ttk.Label(box, text="Layer Recorder", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        ttk.Label(box, textvariable=status, wraplength=370).pack(anchor="w", pady=(4, 0))
+        ttk.Label(box, textvariable=replay_status, wraplength=370).pack(anchor="w")
+        controls = ttk.Frame(box)
+        controls.pack(fill="x", pady=(10, 0))
+
+        def action(name):
+            if busy:
+                return
+            toggle_overlay()
+            handle_hotkey(name)
+
+        buttons = [
+            ("Stop recording" if mode == "record" else "Start recording", "toggle_record"),
+            ("Stop replay" if mode == "replay" else "Start replay", "toggle_replay"),
+            ("Save last minute", "save_short"),
+            ("Save last five minutes", "save_long"),
+        ]
+        for index, (label, name) in enumerate(buttons):
+            button = ttk.Button(controls, text=label, command=lambda name=name: action(name))
+            button.grid(row=index // 2, column=index % 2, sticky="ew", padx=3, pady=3)
+            if busy or (name.startswith("save_") and capture is None) or (
+                    name == "toggle_record" and mode == "replay") or (
+                    name == "toggle_replay" and mode == "record"):
+                button.state(["disabled"])
+        controls.columnconfigure((0, 1), weight=1)
+        ttk.Button(box, text="Open Studio", command=lambda: (toggle_overlay(), open_editor())).pack(
+            anchor="e", pady=(8, 0))
+        overlay.update_idletasks()
+        x = max(0, (overlay.winfo_screenwidth() - overlay.winfo_reqwidth()) // 2)
+        overlay.geometry(f"+{x}+40")
+        overlay.lift()
+        overlay.focus_force()
+
     def handle_hotkey(action):
-        if action == "toggle_record":
+        if action == "toggle_overlay":
+            toggle_overlay()
+        elif action == "toggle_record":
             if capture is None:
                 start("record")
             elif mode == "record":
@@ -351,6 +401,7 @@ def capture_controls(library, *, background=False):
     ttk.Button(panel, text="Open editor", command=open_editor).grid(row=7, column=1, sticky="w", pady=8)
     ttk.Label(panel, textvariable=status, wraplength=430).grid(row=8, column=0, columnspan=3, sticky="w")
 
+    ttk.Label(panel, text="Alt+Z  Open overlay").grid(row=14, column=2, sticky="e")
     ttk.Label(panel, textvariable=replay_status, wraplength=490).grid(
         row=15, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
@@ -450,9 +501,11 @@ def capture_controls(library, *, background=False):
                     return
             update_buttons()
 
-        if hotkeys and not busy and not closing:
+        if hotkeys and not closing:
             try:
-                handle_hotkey(hotkeys.events.get_nowait())
+                action = hotkeys.events.get_nowait()
+                if action == "toggle_overlay" or not busy:
+                    handle_hotkey(action)
             except queue.Empty:
                 pass
 

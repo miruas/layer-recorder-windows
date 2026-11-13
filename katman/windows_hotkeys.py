@@ -5,7 +5,9 @@ from ctypes import wintypes
 import queue
 import threading
 
+OVERLAY_KEY = 0x5A
 HOTKEYS = {
+    OVERLAY_KEY: ("toggle_overlay", "Alt+Z"),
     0x77: ("toggle_record", "Ctrl+Alt+F8"),
     0x78: ("toggle_replay", "Ctrl+Alt+F9"),
     0x79: ("save_short", "Ctrl+Alt+F10"),
@@ -41,7 +43,8 @@ class GlobalHotkeys:
         conflicts = []
         try:
             for key, (_, label) in HOTKEYS.items():
-                if self.user32.RegisterHotKey(None, key, MODIFIERS, key):
+                modifiers = MODIFIERS & ~0x0002 if key == OVERLAY_KEY else MODIFIERS
+                if self.user32.RegisterHotKey(None, key, modifiers, key):
                     registered.append(key)
                 else:
                     conflicts.append(label)
