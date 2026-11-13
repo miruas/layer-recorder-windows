@@ -14,7 +14,9 @@ $pkg = Join-Path $Toolchain 'pkgconf.exe'
 if (!(Test-Path $pkg)) { throw 'Install the MSYS2 UCRT64 gcc, pkgconf and pango packages.' }
 & (Join-Path $PSScriptRoot 'build-gsr-windows-config.ps1') -Compiler $cxx
 & (Join-Path $PSScriptRoot 'test-mgl-windows.ps1') -GenerateOnly
-$includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include")
+$frontPage = Join-Path $build 'front_page_generated.cpp'
+& (Join-Path $PSScriptRoot 'Get-GsrWindowsFrontPage.ps1') -Source $source -OutputFile $frontPage
+$includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Pango and GIO headers are required.' }
 $libs = (& $pkg --libs pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }
@@ -23,8 +25,10 @@ $cSources = @("$port/mgl_win32.c", "$port/mgl_files_win32.c", "$build/window_api
     "$mgl/src/system/clock.c", "$mgl/src/system/utf8.c")
 $cSources += (Get-ChildItem "$mgl/src/graphics" -Filter '*.c').FullName
 $cppSources = @("$port/gsr_widget_smoke.cpp", "$port/config.cpp", "$build/key_names.cpp",
-    "$source/src/Config.cpp", "$source/src/Theme.cpp")
-$cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils') | ForEach-Object { "$source/src/gui/$_.cpp" }
+    "$source/src/Config.cpp", "$source/src/Theme.cpp", "$source/src/Translation.cpp",
+    "$port/front_page.cpp", $frontPage)
+$cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils', 'Page', 'PageStack', 'StaticPage',
+    'List', 'CustomRendererWidget', 'Label', 'Image', 'Button') | ForEach-Object { "$source/src/gui/$_.cpp" }
 $cppSources += (Get-ChildItem "$pp/src" -Recurse -Filter '*.cpp' |
     Where-Object { $_.Name -ne 'Keyboard.cpp' }).FullName
 $objects = @()

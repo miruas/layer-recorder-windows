@@ -7,12 +7,45 @@
 #include "GsrInfo.hpp"
 #include "Theme.hpp"
 #include "gui/DropdownButton.hpp"
+#include "front_page.hpp"
 #include <cstdio>
 #include <string>
+#include <vector>
 
 static void drain(mgl::Window &window, gsr::DropdownButton &button) {
     mgl::Event event;
     while (window.poll_event(event)) button.on_event(event, window, {0, 0});
+}
+
+static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrInfo &info) {
+    using Action = gsr::FrontPageAction;
+    std::vector<Action> actions;
+    gsr::WindowsFrontPage page(config, info, [&](Action action) { actions.push_back(action); });
+    page.resize({480, 360});
+    const auto hwnd = reinterpret_cast<HWND>(window.get_system_handle());
+    const auto send = [&](UINT message, int x, int y) {
+        PostMessageW(hwnd, message, message == WM_LBUTTONDOWN ? MK_LBUTTON : 0, MAKELPARAM(x, y));
+        bool open = true;
+        mgl::Event event;
+        while (window.poll_event(event)) open = page.on_event(event, window) && open;
+        page.draw(window);
+        return open;
+    };
+    page.draw(window);
+    // Original four-column layout at 480x360: 72px cards centered at y=90.
+    for (const int x : {132, 204, 276, 348}) {
+        send(WM_MOUSEMOVE, x, 90);
+        send(WM_LBUTTONDOWN, x, 90);
+        send(WM_LBUTTONUP, x, 90);
+        send(WM_MOUSEMOVE, x, 130);
+        send(WM_LBUTTONDOWN, x, 130);
+        send(WM_LBUTTONUP, x, 130);
+    }
+    send(WM_MOUSEMOVE, 470, 10);
+    send(WM_LBUTTONDOWN, 470, 10);
+    const bool closed = !send(WM_LBUTTONUP, 470, 10);
+    return closed && actions == std::vector<Action>{
+        Action::replay_toggle, Action::record_toggle, Action::stream_toggle, Action::recordings};
 }
 
 static int test(const std::string &resources) {
@@ -56,6 +89,7 @@ static int test(const std::string &resources) {
         drain(window, button);
         if (clicked != "start") result = 5;
     }
+    if (!result && !test_front_page(window, config, info)) result = 6;
     gsr::deinit_color_theme();
     gsr::deinit_theme();
     return result;
@@ -65,6 +99,6 @@ int main(int argc, char **argv) {
     if (argc != 2) return 1;
     mgl::Init platform(mgl::WindowSystem::NATIVE);
     const int result = test(argv[1]);
-    if (!result) std::puts("Original GSR theme, replay icon and dropdown draw and dispatch on Windows.");
+    if (!result) std::puts("Original GSR front page renders and all four Layer cards dispatch on Windows.");
     return result;
 }
