@@ -27,3 +27,18 @@ From PowerShell with a MinGW-w64 C++ compiler on PATH:
 The tool compiles the original patched `Config.cpp` and pinned MGL key name
 table. Its Windows filesystem adapter supports Unicode paths. The command is
 a development check. The installer does not contain or launch this tool.
+
+## Win32 MGL window backend
+
+After preparing the pinned sources, run:
+
+```powershell
+.\tools\test-mgl-windows.ps1
+```
+
+The test links the pinned MGL window API and rectangle renderer against a
+Win32/WGL backend. It checks rendered pixels, monitor enumeration, resize,
+Unicode input, key translation and window recreation on a Windows desktop.
+The backend provides the foundation for the original GSR widgets. The GSR
+page hierarchy, MGL font stack and transparent desktop compositing still
+need integration.
