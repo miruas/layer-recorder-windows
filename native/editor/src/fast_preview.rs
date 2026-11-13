@@ -1499,7 +1499,9 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), &link).unwrap();
         #[cfg(windows)]
-        if std::os::windows::fs::symlink_dir(outside.path(), &link).is_err() { return; }
+        if std::os::windows::fs::symlink_file(outside.path(), &link).is_err() {
+            return;
+        }
         let key = Key {
             path: link,
             root: root.path().into(),
