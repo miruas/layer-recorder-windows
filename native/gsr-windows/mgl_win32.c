@@ -75,12 +75,19 @@ static const unsigned short keys[__MGL_NUM_KEYS__] = {
     [MGL_KEY_PERIOD]=VK_OEM_PERIOD, [MGL_KEY_QUOTE]=VK_OEM_7, [MGL_KEY_SLASH]=VK_OEM_2,
     [MGL_KEY_BACKSLASH]=VK_OEM_5, [MGL_KEY_TILDE]=VK_OEM_3,
     [MGL_KEY_EQUAL]=VK_OEM_PLUS, [MGL_KEY_HYPHEN]=VK_OEM_MINUS,
+    [MGL_KEY_MENU]=VK_APPS, [MGL_KEY_ADD]=VK_ADD, [MGL_KEY_SUBTRACT]=VK_SUBTRACT,
+    [MGL_KEY_MULTIPLY]=VK_MULTIPLY, [MGL_KEY_DIVIDE]=VK_DIVIDE,
+    [MGL_KEY_AUDIO_LOWER_VOLUME]=VK_VOLUME_DOWN, [MGL_KEY_AUDIO_RAISE_VOLUME]=VK_VOLUME_UP,
+    [MGL_KEY_AUDIO_PLAY]=VK_MEDIA_PLAY_PAUSE, [MGL_KEY_AUDIO_STOP]=VK_MEDIA_STOP,
+    [MGL_KEY_AUDIO_MUTE]=VK_VOLUME_MUTE, [MGL_KEY_AUDIO_PREV]=VK_MEDIA_PREV_TRACK,
+    [MGL_KEY_AUDIO_NEXT]=VK_MEDIA_NEXT_TRACK,
 };
 
 static unsigned virtual_key(mgl_key key) {
     if (key >= MGL_KEY_A && key <= MGL_KEY_Z) return 'A' + key - MGL_KEY_A;
     if (key >= MGL_KEY_NUM0 && key <= MGL_KEY_NUM9) return '0' + key - MGL_KEY_NUM0;
     if (key >= MGL_KEY_F1 && key <= MGL_KEY_F15) return VK_F1 + key - MGL_KEY_F1;
+    if (key >= MGL_KEY_F16 && key <= MGL_KEY_F24) return VK_F16 + key - MGL_KEY_F16;
     if (key >= MGL_KEY_NUMPAD0 && key <= MGL_KEY_NUMPAD9) return VK_NUMPAD0 + key - MGL_KEY_NUMPAD0;
     return keys[key];
 }

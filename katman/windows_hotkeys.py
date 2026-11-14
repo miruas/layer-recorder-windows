@@ -50,13 +50,33 @@ GSR_BINDINGS = {
 
 def gsr_key(key):
     # Serialized values in the pinned MGL key enum.
-    for start, end, vk, name in ((1, 26, 0x41, "letter"), (27, 36, 0x30, "digit"),
-                                 (86, 100, 0x70, "function"), (116, 124, 0x7F, "function")):
-        if start <= key <= end:
-            code = vk + key - start
-            return code, f"F{code - 0x6F}" if name == "function" else chr(code)
-    return {37: (0x1B, "Esc"), 58: (0x20, "Space"), 59: (0x0D, "Enter"),
-            61: (0x09, "Tab"), 102: (0x2C, "Print Screen")}.get(key)
+    if 1 <= key <= 36:
+        code = 0x41 + key - 1 if key <= 26 else 0x30 + key - 27
+        return code, chr(code)
+    if 86 <= key <= 100 or 116 <= key <= 124:
+        number = key - 85 if key <= 100 else key - 100
+        return 0x6F + number, f"F{number}"
+    if 76 <= key <= 85:
+        number = key - 76
+        return 0x60 + number, f"Numpad {number}"
+    return {
+        37: (0x1B, "Esc"), 46: (0x5D, "Menu"),
+        47: (0xDB, "["), 48: (0xDD, "]"), 49: (0xBA, ";"),
+        50: (0xBC, ","), 51: (0xBE, "."), 52: (0xDE, "'"),
+        53: (0xBF, "/"), 54: (0xDC, "\\"), 55: (0xC0, "`"),
+        56: (0xBB, "="), 57: (0xBD, "-"), 58: (0x20, "Space"),
+        59: (0x0D, "Enter"), 60: (0x08, "Backspace"), 61: (0x09, "Tab"),
+        62: (0x21, "Page Up"), 63: (0x22, "Page Down"),
+        64: (0x23, "End"), 65: (0x24, "Home"), 66: (0x2D, "Insert"), 67: (0x2E, "Delete"),
+        68: (0x6B, "Numpad +"), 69: (0x6D, "Numpad -"),
+        70: (0x6A, "Numpad *"), 71: (0x6F, "Numpad /"),
+        72: (0x25, "Left"), 73: (0x27, "Right"), 74: (0x26, "Up"), 75: (0x28, "Down"),
+        101: (0x13, "Pause"), 102: (0x2C, "Print Screen"), 103: (0x0D, "Enter"),
+        104: (0xAE, "Volume Down"), 105: (0xAF, "Volume Up"),
+        106: (0xB3, "Play/Pause"), 107: (0xB2, "Media Stop"), 108: (0xB3, "Play/Pause"),
+        109: (0xAD, "Mute"), 110: (0xB1, "Previous Track"), 111: (0xB0, "Next Track"),
+        115: (0xDE, "'"),
+    }.get(key)
 
 
 def hotkey_bindings(settings=None):
