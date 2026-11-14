@@ -756,7 +756,20 @@ def capture_controls(library, *, background=False):
     apply_hotkeys()
     update_buttons()
     root.after(150, poll)
-    root.after(200, lambda: refresh_audio() if not busy and capture is None else None)
+    def initialize_capture():
+        if busy or closing or capture is not None:
+            return
+        settings = gsr_settings("replay")
+        if settings.get("turn_on_replay_automatically_mode") == "turn_on_at_system_startup":
+            options = settings.get("record_options")
+            target = options.get("record_area_option") if isinstance(options, dict) else None
+            if target not in ("window", "region"):
+                start("replay", use_gsr=True)
+                return
+            status.set("Select a monitor in GSR to start replay automatically.")
+        refresh_audio()
+
+    root.after(200, initialize_capture)
     try:
         root.mainloop()
     finally:
