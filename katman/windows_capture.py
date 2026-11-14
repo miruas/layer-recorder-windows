@@ -185,6 +185,25 @@ def video_cursor(options):
     return value if type(value) is bool else None
 
 
+def video_color_range(options):
+    value = options.get("color_range") if isinstance(options, dict) else None
+    return {"full": "pc", "limited": "tv"}.get(value) if isinstance(value, str) else None
+
+
+def set_video_color_range(command, color_range):
+    if color_range is None:
+        return
+    index = command.index("-vf") + 1
+    filters = command[index].split(",")
+    if filters[0].startswith("scale="):
+        filters[0] += f":out_range={color_range}"
+    else:
+        filters.insert(0, f"scale=out_range={color_range}")
+    command[index] = ",".join(filters)
+    index = command.index("-c:v")
+    command[index:index] = ["-color_range", color_range]
+
+
 def capture_binary():
     return Path(os.environ.get("LAYER_CAPTURE_BINARY", APP / "bin/layer-capture.exe"))
 
@@ -290,7 +309,8 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
 class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
-                 follow_application_audio=False, fixed_region=None, resolution=None, cursor=None):
+                 follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
+                 color_range=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -311,6 +331,7 @@ class Capture:
         self.fixed_region = fixed_region
         self.resolution = resolution
         self.cursor = cursor
+        self.color_range = color_range
         self.fixed_windows = [source for source in selected if source.window]
         self.follow_application_audio = follow_application_audio
         self.tracks = []
@@ -345,7 +366,8 @@ class Capture:
         self.single_display = current[0] if len(current) == 1 and current[0].primary else None
 
     def _backend(self, source):
-        if (self.resolution is None and self.encoder == "h264_nvenc" and source == self.single_display and
+        if (self.resolution is None and self.color_range != "pc" and
+                self.encoder == "h264_nvenc" and source == self.single_display and
                 source.key not in self.duplication_failed and source.width % 2 == source.height % 2 == 0):
             return "ddagrab"
         return "gdigrab"
@@ -357,6 +379,8 @@ class Capture:
             command = (desktop_duplication_command(source, self.fps) if backend == "ddagrab"
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             set_capture_cursor(command, self.cursor)
+            if backend == "gdigrab":
+                set_video_color_range(command, self.color_range)
             stem, timescale = "display", TIMESCALE
         else:
             from .windows_audio import AUDIO_TIMESCALE, capture_audio_command
