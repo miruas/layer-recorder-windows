@@ -21,12 +21,25 @@ Global shortcuts are enabled by default while Layer runs, including in the notif
 | Shortcut | Action |
 | --- | --- |
 | Alt+Z | Open or close the recording overlay |
+| Alt+F7 | Pause or resume recording |
+| Alt+F8 | Start or stop livestreaming |
+| Alt+F9 | Start or stop recording |
+| Shift+F9 | Start or stop recording the foreground window |
+| Ctrl+F9 | Select a region to record or stop region recording |
+| Shift+Alt+F10 | Start or stop instant replay |
+| Alt+F10 | Save the configured replay duration |
+| Alt+F11 | Save up to the short replay limit |
+| Alt+F12 | Save up to the long replay limit |
+| Print Screen | Take a screenshot |
+| Shift+Print Screen | Take a screenshot of the foreground window |
+| Ctrl+Print Screen | Select a region for a screenshot |
+| Win+Alt+Z | Open Layer Studio |
 | Ctrl+Alt+F8 | Start or stop normal recording |
 | Ctrl+Alt+F9 | Start or stop replay |
 | Ctrl+Alt+F10 | Save up to the last minute |
 | Ctrl+Alt+F11 | Save up to the last five minutes |
 
-The overlay opens above the desktop and borderless windows. Exclusive fullscreen applications control their own display mode. Use the global recording and replay shortcuts in that mode. Another application may already own Alt+Z, in which case Layer reports the conflict and the tray menu can still open the panel.
+The bundled overlay uses the original Layer-patched GSR interface for Replay, Record, Livestream, Recordings and settings. It opens above the desktop and borderless windows. Exclusive fullscreen applications control their own display mode. Use the global recording and replay shortcuts in that mode. Another application may already own Alt+Z, in which case Layer reports the conflict and the tray menu can still open the panel.
 
 ## Edit and export
 
@@ -40,12 +53,14 @@ Use **Export project…** or run:
 
 ## Build from source
 
-Install stable Rust and a Windows linker. For the default MSVC toolchain, install Visual Studio Build Tools with **Desktop development with C++**.
+Install stable Rust and a Windows linker. For the default MSVC toolchain, install Visual Studio Build Tools with **Desktop development with C++**. Install MSYS2 and the UCRT64 packages `mingw-w64-ucrt-x86_64-gcc`, `mingw-w64-ucrt-x86_64-pkgconf` and `mingw-w64-ucrt-x86_64-pango` to build the original overlay.
 
 ```powershell
 git clone https://github.com/miruas/layer-recorder-windows.git
 cd layer-recorder-windows
 .\tools\build-windows.ps1
+.\tools\test-gsr-windows-widgets.ps1 -OverlayDirectory overlay
+.\tools\test-gsr-windows-overlay.ps1 -OverlayDirectory overlay -CloseSettings
 .\tools\install-windows.ps1
 .\Layer.cmd editor
 ```
