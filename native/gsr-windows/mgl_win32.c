@@ -166,8 +166,9 @@ static LRESULT CALLBACK dispatch(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) 
         return 0;
     case WM_KEYDOWN: case WM_SYSKEYDOWN:
     case WM_KEYUP: case WM_SYSKEYUP:
-        if (!self->key_repeat_enabled && !(lp & (1UL << 31)) && (lp & (1UL << 30))) return 0;
-        event.type = (lp & (1UL << 31)) ? MGL_EVENT_KEY_RELEASED : MGL_EVENT_KEY_PRESSED;
+        event.type = (message == WM_KEYUP || message == WM_SYSKEYUP)
+            ? MGL_EVENT_KEY_RELEASED : MGL_EVENT_KEY_PRESSED;
+        if (!self->key_repeat_enabled && event.type == MGL_EVENT_KEY_PRESSED && (lp & (1UL << 30))) return 0;
         event.key = (mgl_key_event){event_key(wp, lp), modifiers()};
         if (message == WM_SYSKEYDOWN && wp == VK_F4) return DefWindowProcW(hwnd, message, wp, lp);
         break;

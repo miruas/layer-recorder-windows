@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <windows.h>
 #include <algorithm>
+#include <chrono>
 #include "front_page.hpp"
 #include "Theme.hpp"
 #include "Translation.hpp"
@@ -182,6 +183,10 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
         };
         draw();
         window.set_visible(true);
+        // Upstream GSR advances scroll and hover animations while rendering.
+        // Stop scheduling frames once the interactive animation has settled.
+        using Clock = std::chrono::steady_clock;
+        auto animate_until = Clock::now();
         while (open && window.is_open()) {
             mgl::Event event;
             while (open && window.poll_event(event)) {
@@ -193,9 +198,17 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
                     const bool page_open = page.on_event(event, window);
                     open = open && page_open;
                 }
-                if (open) draw();
+                if (open) {
+                    draw();
+                    animate_until = Clock::now() + std::chrono::milliseconds(650);
+                }
             }
-            if (open && window.is_open()) MsgWaitForMultipleObjectsEx(0, nullptr, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            if (open && window.is_open()) {
+                const bool animating = Clock::now() < animate_until;
+                const auto result = MsgWaitForMultipleObjectsEx(
+                    0, nullptr, animating ? 16 : INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                if (result == WAIT_TIMEOUT) draw();
+            }
         }
         window.set_visible(false);
     }

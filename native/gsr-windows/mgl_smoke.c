@@ -34,13 +34,16 @@ int main(void) {
     HWND hwnd = mgl_window_get_system_handle(&window);
     PostMessageW(hwnd, WM_CHAR, 0x00fc, 0);
     PostMessageW(hwnd, WM_KEYDOWN, VK_F9, 0);
+    PostMessageW(hwnd, WM_KEYUP, VK_F9, 0);
     PostMessageW(hwnd, WM_CLOSE, 0, 0);
-    bool text = false, key = false, close = false;
+    bool text = false, key = false, released = false, close = false;
     while (mgl_window_poll_event(&window, &event)) {
         if (event.type == MGL_EVENT_TEXT_ENTERED)
             text = event.text.size == 2 && event.text.codepoint == 0x00fc;
         if (event.type == MGL_EVENT_KEY_PRESSED)
             key = event.key.code == MGL_KEY_F9;
+        if (event.type == MGL_EVENT_KEY_RELEASED)
+            released = event.key.code == MGL_KEY_F9;
         if (event.type == MGL_EVENT_CLOSED) close = true;
     }
     mgl_window_close(&window);
@@ -48,7 +51,7 @@ int main(void) {
     if (mgl_window_create(&window, "MGL Win32 reopen test", &params)) return 8;
     mgl_window_deinit(&window);
     mgl_deinit();
-    if (!text || !key || !close) return 5;
+    if (!text || !key || !released || !close) return 5;
     puts("MGL Win32 OpenGL drawing, monitor inventory, resize, Unicode input, key events and reopening passed.");
     return 0;
 }
