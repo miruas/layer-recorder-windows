@@ -2,11 +2,12 @@
 """Publish a Windows capture using the GSR streaming destination."""
 import subprocess
 import threading
+from queue import Empty, Full, Queue
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from .windows_capture import capture_command
-from .windows_audio import AUDIO_TIMESCALE, CHANNELS, capture_pcm, gsr_audio_selection
+from .windows_audio import AUDIO_TIMESCALE, CHANNELS, FRAME_BYTES, capture_pcm, gsr_audio_selection
 
 
 @dataclass(frozen=True)
@@ -58,22 +59,72 @@ def stream_frame_rate(settings):
     return rate if type(rate) is int and 1 <= rate <= 500 else 30
 
 
-def stream_audio_source(settings, inventory):
+def stream_audio_sources(settings, inventory):
     options = settings.get("record_options") or {}
     tracks = options.get("audio_track_item", [{"audio_inputs": ["default_output"]}])
-    sources = gsr_audio_selection(tracks, inventory)
-    if len(sources) > 1:
-        raise ValueError("Select one audio source for the Windows livestream.")
-    return next(iter(sources), None)
+    return gsr_audio_selection(tracks, inventory)
+
+
+def mix_audio(sources, output, stop):
+    import numpy as np
+
+    block_size = AUDIO_TIMESCALE // 50 * FRAME_BYTES
+    errors = Queue()
+
+    class Input:
+        def __init__(self):
+            self.blocks = Queue(maxsize=25)
+            self.pending = bytearray()
+
+        def write(self, data):
+            self.pending.extend(data)
+            while len(self.pending) >= block_size and not stop.is_set():
+                try:
+                    self.blocks.put(bytes(self.pending[:block_size]), timeout=.1)
+                except Full:
+                    continue
+                del self.pending[:block_size]
+
+    def read(source, sink):
+        try:
+            capture_pcm(source, sink, stop)
+        except Exception as error:
+            errors.put(error)
+            stop.set()
+
+    inputs = [Input() for _ in sources]
+    readers = [threading.Thread(target=read, args=(source, sink), daemon=True)
+               for source, sink in zip(sources, inputs)]
+    for reader in readers:
+        reader.start()
+    try:
+        while not stop.is_set():
+            mixed = np.zeros(block_size // 2, dtype=np.int32)
+            for sink in inputs:
+                while not stop.is_set():
+                    try:
+                        block = sink.blocks.get(timeout=.1)
+                    except Empty:
+                        continue
+                    mixed += np.frombuffer(block, dtype="<i2")
+                    break
+            if not stop.is_set():
+                output.write(mixed.clip(-32768, 32767).astype("<i2").tobytes())
+        if not errors.empty():
+            raise errors.get()
+    finally:
+        stop.set()
+        for reader in readers:
+            reader.join(timeout=2)
 
 
 class Livestream:
-    def __init__(self, display, fps, encoder, destination, audio=None):
+    def __init__(self, display, fps, encoder, destination, audio=()):
         whip = isinstance(destination, WhipDestination)
         command = capture_command(display, fps, encoder)
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
-        if audio is not None:
+        if audio:
             index = command.index("-an")
             command[index:index + 1] = [
                 "-thread_queue_size", "64", "-f", "s16le", "-ar", str(AUDIO_TIMESCALE),
@@ -95,17 +146,20 @@ class Livestream:
             command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        if audio is not None:
+        if audio:
             self.audio_thread = threading.Thread(target=self._feed_audio, args=(audio,), daemon=True)
             self.audio_thread.start()
 
-    def _feed_audio(self, source):
+    def _feed_audio(self, sources):
         try:
             with self.process.stdin as output:
-                capture_pcm(source, output, self.audio_stop)
+                if len(sources) == 1:
+                    capture_pcm(sources[0], output, self.audio_stop)
+                else:
+                    mix_audio(sources, output, self.audio_stop)
         except BrokenPipeError:
             pass
-        except OSError as error:
+        except Exception as error:
             self.audio_error = str(error)
 
     def poll(self):

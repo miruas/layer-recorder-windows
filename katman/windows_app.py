@@ -378,13 +378,13 @@ def capture_controls(library, *, background=False):
             show()
 
     def launch_stream(source, rate, destination, settings):
-        from .windows_stream import Livestream, stream_audio_source
+        from .windows_stream import Livestream, stream_audio_sources
 
         codec = encoder.get()
         status.set("Starting livestream…")
 
         def publish():
-            audio = stream_audio_source(settings, read_audio_inventory())
+            audio = stream_audio_sources(settings, read_audio_inventory())
             return Livestream(source, rate, codec, destination, audio)
 
         submit("stream_start", publish)

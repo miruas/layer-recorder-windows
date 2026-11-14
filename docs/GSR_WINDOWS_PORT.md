@@ -85,6 +85,6 @@ Alt+F7 and the Record menu pause and resume recording. Resume starts new
 media segments, and the recording timeline excludes the paused interval.
 The Livestream card and Alt+F8 start or stop video publishing over RTMP or
 RTMPS. Publishing uses the configured monitor, window or selected region.
-One selected WASAPI source is published as AAC for RTMP or RTMPS. WHIP uses
+Selected WASAPI sources are mixed into one AAC track for RTMP or RTMPS. WHIP uses
 H.264 and Opus, with the optional bearer token from GSR settings.
-Multiple-source live mixing and custom non-FLV containers still need integration.
+Custom non-FLV containers still need integration.
