@@ -246,6 +246,10 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
             while (open && window.poll_event(event)) {
                 if (event.type == mgl::Event::Closed) {
                     open = false;
+                } else if (event.type == mgl::Event::LostFocus &&
+                           GetForegroundWindow() != hwnd && !page.editing_hotkey()) {
+                    while (page.back()) {}
+                    open = false;
                 } else if (!page.editing_hotkey() && event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape) {
                     open = page.back();
                 } else {
