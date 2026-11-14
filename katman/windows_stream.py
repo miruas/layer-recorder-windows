@@ -2,10 +2,17 @@
 """Publish a Windows capture using the GSR streaming destination."""
 import subprocess
 import threading
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from .windows_capture import capture_command
 from .windows_audio import AUDIO_TIMESCALE, CHANNELS, capture_pcm, gsr_audio_selection
+
+
+@dataclass(frozen=True)
+class WhipDestination:
+    url: str
+    token: str = field(repr=False)
 
 
 def stream_destination(settings):
@@ -18,6 +25,15 @@ def stream_destination(settings):
     options = settings.get(service, {}) if isinstance(service, str) else {}
     if not isinstance(options, dict):
         raise ValueError("Invalid GSR livestream settings.")
+    if service == "whip":
+        url, token = options.get("url", ""), options.get("bearer_token", "")
+        if not isinstance(url, str) or not isinstance(token, str) or "\r" in token or "\n" in token:
+            raise ValueError("Invalid GSR WHIP URL or bearer token.")
+        url = url.strip()
+        parsed = urlsplit(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.fragment:
+            raise ValueError("Enter a valid HTTP or HTTPS WHIP endpoint in the GSR livestream settings.")
+        return WhipDestination(url, token.strip())
     if service in providers:
         base = providers[service]
     elif service in ("custom", "kick"):
@@ -53,6 +69,7 @@ def stream_audio_source(settings, inventory):
 
 class Livestream:
     def __init__(self, display, fps, encoder, destination, audio=None):
+        whip = isinstance(destination, WhipDestination)
         command = capture_command(display, fps, encoder)
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
@@ -61,10 +78,16 @@ class Livestream:
             command[index:index + 1] = [
                 "-thread_queue_size", "64", "-f", "s16le", "-ar", str(AUDIO_TIMESCALE),
                 "-ac", str(CHANNELS), "-i", "pipe:0", "-map", "0:v:0", "-map", "1:a:0",
-                "-c:a", "aac", "-b:a", "160k", "-shortest",
+                "-c:a", "libopus" if whip else "aac", "-b:a", "160k", "-shortest",
             ]
             command.insert(1, "-nostdin")
-        command.extend(["-rw_timeout", "5000000", "-f", "flv", destination])
+        if whip:
+            command.extend(["-f", "whip", "-handshake_timeout", "5000", "-timeout", "5s"])
+            if destination.token:
+                command.extend(["-authorization", destination.token])
+            command.append(destination.url)
+        else:
+            command.extend(["-rw_timeout", "5000000", "-f", "flv", destination])
         self.audio_stop = threading.Event()
         self.audio_thread = None
         self.audio_error = None

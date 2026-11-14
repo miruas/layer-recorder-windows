@@ -130,6 +130,7 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
     if (!gsr::init_theme(resources)) return 5;
 
     gsr::GsrInfo info{};
+    info.supported_containers.whip = true;
     info.system_info.supports_app_audio = true;
     info.supported_image_formats.png = true;
     info.supported_image_formats.jpeg = true;
