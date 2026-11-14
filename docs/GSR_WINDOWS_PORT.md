@@ -91,4 +91,5 @@ The Livestream card and Alt+F8 start or stop video publishing over RTMP or
 RTMPS. Publishing uses the configured monitor, window or selected region.
 Selected WASAPI sources are mixed into one AAC track for RTMP or RTMPS. WHIP uses
 H.264 and Opus, with the optional bearer token from GSR settings.
-Custom non-FLV containers still need integration.
+Custom publishing uses the selected GSR container. RTMP/FLV, fragmented MP4
+and MPEG-TS over TCP, and HLS over HTTP PUT were verified against local receivers.

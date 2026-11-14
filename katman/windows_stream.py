@@ -16,6 +16,12 @@ class WhipDestination:
     token: str = field(repr=False)
 
 
+@dataclass(frozen=True)
+class CustomDestination:
+    url: str = field(repr=False)
+    container: str
+
+
 def stream_destination(settings):
     service = settings.get("service", "custom")
     providers = {
@@ -45,10 +51,27 @@ def stream_destination(settings):
     if not isinstance(base, str) or not isinstance(key, str):
         raise ValueError("Invalid GSR livestream URL or key.")
     base, key = base.strip(), key.strip()
+    if base and service == "custom" and "://" not in base:
+        base = "rtmp://" + base
     parsed = urlsplit(base)
-    if parsed.scheme not in ("rtmp", "rtmps") or not parsed.hostname:
+    if not parsed.hostname:
+        raise ValueError("Enter a valid livestream URL.")
+    if service == "custom":
+        container = options.get("container", "flv")
+        protocols = {
+            "flv": ("rtmp", "rtmps", "tcp", "http", "https"),
+            "mp4": ("tcp", "http", "https"),
+            "mpegts": ("srt", "tcp", "udp", "http", "https"),
+            "hls": ("http", "https"),
+        }
+        if not isinstance(container, str) or parsed.scheme not in protocols.get(container, ()):
+            raise ValueError("The selected GSR container does not support this publishing URL.")
+        if key:
+            base += ("" if base.endswith(("/", "=")) else "/") + key
+        return CustomDestination(base, container)
+    if parsed.scheme not in ("rtmp", "rtmps"):
         raise ValueError("Enter a valid RTMP or RTMPS URL in the GSR livestream settings.")
-    if not key and service != "custom":
+    if not key:
         raise ValueError("Enter the stream key in the GSR livestream settings.")
     return base.rstrip("/") + "/" + key if key else base
 
@@ -137,6 +160,13 @@ class Livestream:
             if destination.token:
                 command.extend(["-authorization", destination.token])
             command.append(destination.url)
+        elif isinstance(destination, CustomDestination):
+            command.extend(["-rw_timeout", "5000000"])
+            if destination.container == "mp4":
+                command.extend(["-movflags", "empty_moov+default_base_moof+frag_keyframe"])
+            elif destination.container == "hls":
+                command.extend(["-method", "PUT", "-hls_time", "2"])
+            command.extend(["-f", destination.container, destination.url])
         else:
             command.extend(["-rw_timeout", "5000000", "-f", "flv", destination])
         self.audio_stop = threading.Event()
