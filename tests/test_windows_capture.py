@@ -15,9 +15,27 @@ from katman.windows_capture import (
     set_video_framerate_mode, video_framerate_mode,
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
+from katman.windows_stream import stream_video_command
 
 
 class ReplayTests(unittest.TestCase):
+    def test_video_only_nvenc_stream_probes_dxgi_before_publishing(self):
+        display = Display("DISPLAY1", 0, 0, 1920, 1080, True)
+        with (patch("katman.windows_stream.displays", return_value=[display]),
+              patch("katman.windows_stream.dxgi_targets", return_value={"display1": (1, 2)}),
+              patch("katman.windows_stream.subprocess.run") as run):
+            command = stream_video_command(display, 60, "h264_nvenc", None, False, None, None, None)
+            self.assertIn("d3d11va=layer:1", command)
+            self.assertIn("ddagrab=output_idx=2:framerate=60:output_fmt=bgra:draw_mouse=0", command)
+            self.assertEqual(run.call_args.args[0][-5:], ["-frames:v", "1", "-f", "null", "-"])
+            run.side_effect = subprocess.TimeoutExpired("ffmpeg", 5)
+            self.assertIn("gdigrab", stream_video_command(display, 60, "h264_nvenc", None, None, None, None, None))
+            run.reset_mock()
+            self.assertIn("gdigrab", stream_video_command(
+                display, 60, "h264_nvenc", None, None, None, None, None, audio=True,
+            ))
+            run.assert_not_called()
+
     def test_monitor_and_region_resolve_by_dxgi_device_name(self):
         primary = Display("DISPLAY1", 0, 0, 1920, 1080, True)
         secondary = Display("DISPLAY7", -1920, 0, 1920, 1080)

@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from .windows_capture import (
-    capture_command, scale_video, set_capture_cursor, set_video_color_range,
+    capture_command, desktop_duplication_command, displays, dxgi_targets, scale_video,
+    set_capture_cursor, set_video_color_range,
     set_video_framerate_mode, set_video_rate_control,
 )
 from .windows_audio import AUDIO_TIMESCALE, CHANNELS, FRAME_BYTES, capture_pcm, gsr_audio_selection
@@ -150,15 +151,43 @@ def mix_audio(sources, output, stop):
             reader.join(timeout=2)
 
 
+def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode,
+                         *, audio=False):
+    if not audio and encoder == "h264_nvenc" and resolution is None and color_range != "pc" and (
+            framerate_mode != "content" and not display.window and display.width % 2 == display.height % 2 == 0):
+        try:
+            monitor = next((monitor for monitor in displays() if display == monitor or (
+                display.name == "Selected region" and monitor.x <= display.x and monitor.y <= display.y and
+                display.x + display.width <= monitor.x + monitor.width and
+                display.y + display.height <= monitor.y + monitor.height)), None)
+            target = dxgi_targets().get(monitor.name.casefold()) if monitor else None
+            if target is not None:
+                command = desktop_duplication_command(display, fps, monitor, target)
+                set_capture_cursor(command, cursor)
+                set_video_rate_control(command, rate_control)
+                set_video_framerate_mode(command, framerate_mode, fps)
+                # Check capture and encoding before opening a connection to the publisher.
+                probe = command[:command.index("-video_track_timescale")]
+                subprocess.run(probe + ["-frames:v", "1", "-f", "null", "-"], check=True,
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
+                return command
+        except (OSError, subprocess.SubprocessError):
+            pass
+    command = scale_video(capture_command(display, fps, encoder), resolution)
+    set_capture_cursor(command, cursor)
+    set_video_color_range(command, color_range)
+    set_video_rate_control(command, rate_control)
+    set_video_framerate_mode(command, framerate_mode, fps)
+    return command
+
+
 class Livestream:
     def __init__(self, display, fps, encoder, destination, audio=(), *, resolution=None, cursor=None,
                  color_range=None, rate_control=None, framerate_mode=None):
         whip = isinstance(destination, WhipDestination)
-        command = scale_video(capture_command(display, fps, encoder), resolution)
-        set_capture_cursor(command, cursor)
-        set_video_color_range(command, color_range)
-        set_video_rate_control(command, rate_control)
-        set_video_framerate_mode(command, framerate_mode, fps)
+        command = stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control,
+                                       framerate_mode, audio=bool(audio))
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
         if audio:
