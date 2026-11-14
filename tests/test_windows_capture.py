@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import time
 import unittest
@@ -82,6 +83,22 @@ def wait_fragments(test, capture, track, count=1):
 @unittest.skipUnless(capture_binary().is_file() and shutil.which("ffmpeg") and shutil.which("ffprobe"),
                      "The Rust capture engine and FFmpeg are required")
 class ProjectTests(unittest.TestCase):
+    def test_content_mode_retains_motion_and_static_replay_heartbeat(self):
+        display = Display("Fixture", 0, 0, 320, 240)
+        with tempfile.TemporaryDirectory() as directory:
+            for pattern, expected in (("color", 4), ("testsrc2", 120)):
+                with self.subTest(pattern=pattern):
+                    output = Path(directory) / f"{pattern}.mp4"
+                    command = capture_command(display, 30, "libx264")
+                    command[4:command.index("-an")] = ["-f", "lavfi", "-i", f"{pattern}=s=320x240:r=30"]
+                    set_video_framerate_mode(command, video_framerate_mode({"framerate_mode": "content"}), 30)
+                    subprocess.run(command[:-1] + ["-t", "4", str(output)], check=True, timeout=15)
+                    count = subprocess.check_output([
+                        "ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+                        "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(output),
+                    ], timeout=10)
+                    self.assertEqual(int(count), expected)
+
     def test_two_tracks_record_replay_and_export(self):
         monitor = Display("Primary", 0, 0, 96, 64, True)
         second = Display("Left", -96, 0, 96, 64)

@@ -23,6 +23,11 @@ $fileChooser = Join-Path $build 'file_chooser_generated.cpp'
 & (Join-Path $PSScriptRoot 'Get-GsrWindowsFrontPage.ps1') -Source $source -OutputFile $frontPage
 & (Join-Path $PSScriptRoot 'Get-GsrWindowsFileChooser.ps1') -Source $source -OutputFile $fileChooser
 & (Join-Path $PSScriptRoot 'Get-GsrWindowsGlobalSettings.ps1') -Source $source -OutputDirectory $build
+$settingsPage = Join-Path $build 'settings_page_generated.cpp'
+$settingsCode = Get-Content -LiteralPath "$source/src/gui/SettingsPage.cpp" -Raw
+$settingsCode = $settingsCode.Replace('../../include/', '')
+$settingsCode = $settingsCode.Replace('Sync to content (Only X11 or desktop portal capture)', 'Sync to content')
+Set-Content -LiteralPath $settingsPage -Value $settingsCode -Encoding utf8
 $includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port", "-I$build")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Pango and GIO headers are required.' }
@@ -33,11 +38,11 @@ $cSources = @("$port/mgl_win32.c", "$port/mgl_files_win32.c", "$build/window_api
 $cSources += (Get-ChildItem "$mgl/src/graphics" -Filter '*.c').FullName
 $cppSources = @("$port/config.cpp", "$build/key_names.cpp",
     "$source/src/Config.cpp", "$source/src/Theme.cpp", "$source/src/Translation.cpp",
-    "$port/front_page.cpp", "$port/settings_platform.cpp", $frontPage, $fileChooser, "$build/global_settings_generated.cpp")
+    "$port/front_page.cpp", "$port/settings_platform.cpp", $frontPage, $fileChooser, $settingsPage, "$build/global_settings_generated.cpp")
 $cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils', 'Page', 'PageStack', 'StaticPage',
     'List', 'CustomRendererWidget', 'Label', 'Image', 'Button', 'ScreenshotSettingsPage',
     'GsrPage', 'ScrollablePage', 'Subsection', 'RadioButton', 'LineSeparator', 'ComboBox', 'CheckBox',
-    'Entry', 'SettingsPage') | ForEach-Object { "$source/src/gui/$_.cpp" }
+    'Entry') | ForEach-Object { "$source/src/gui/$_.cpp" }
 $cppSources += (Get-ChildItem "$pp/src" -Recurse -Filter '*.cpp' |
     Where-Object { $_.Name -ne 'Keyboard.cpp' }).FullName
 $objects = @()

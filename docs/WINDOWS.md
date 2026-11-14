@@ -45,6 +45,8 @@ With GSR's **Auto** or **H264** codec, Layer uses NVIDIA NVENC when a short enco
 
 GSR's **Audio codec** setting applies to the independent audio tracks for Record and Instant Replay. A replay saved during recording shares the active recording's encoded tracks. MOV and FLV output convert Opus tracks to AAC for container compatibility.
 
+**Sync to content** skips repeated frames with GDI capture and retains approximately one frame per second on a static screen so replay continues advancing. NVENC can still encode these frames when selected.
+
 ## Edit and export
 
 Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` directory together. Choose **Open editor** to browse the library or open an existing project. Studio mixes enabled audio tracks during timeline playback. **Record voiceover** captures the selected microphone and inserts a separate audio clip at the playhead.

@@ -220,12 +220,18 @@ def desktop_duplication_command(display, fps):
 
 def video_framerate_mode(options):
     mode = options.get("framerate_mode") if isinstance(options, dict) else None
-    return mode if mode in ("cfr", "vfr") else None
+    return mode if mode in ("cfr", "vfr", "content") else None
 
 
 def set_video_framerate_mode(command, mode, fps):
     if mode is None:
         return
+    if mode == "content":
+        # Keep one frame per second in a static scene so replay keeps advancing.
+        if fps > 1:
+            index = command.index("-vf") + 1
+            command[index] += f",format=yuv420p,mpdecimate=max={fps - 1}:hi=0:lo=0:frac=0"
+        mode = "vfr"
     for flag in ("-fps_mode", "-r"):
         if flag in command:
             index = command.index(flag)
@@ -508,7 +514,7 @@ class Capture:
         self.single_display = current[0] if len(current) == 1 and current[0].primary else None
 
     def _backend(self, source):
-        if (self.resolution is None and self.color_range != "pc" and
+        if (self.resolution is None and self.color_range != "pc" and self.framerate_mode != "content" and
                 self.encoder == "h264_nvenc" and source == self.single_display and
                 source.key not in self.duplication_failed and source.width % 2 == source.height % 2 == 0):
             return "ddagrab"
