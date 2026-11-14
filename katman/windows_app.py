@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Windows launcher and capture controls."""
 import argparse
+import ctypes
+from ctypes import wintypes
 from dataclasses import asdict
 import json
 import os
@@ -46,6 +48,32 @@ def export(path, output):
 def console_python():
     executable = Path(sys.executable)
     return str(executable.with_name("python.exe")) if executable.name.lower() == "pythonw.exe" else str(executable)
+
+
+def request_overlay_close(process):
+    user32 = ctypes.WinDLL("user32")
+    callback = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [callback, wintypes.LPARAM]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+
+    @callback
+    def close_window(window, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(window, ctypes.byref(owner))
+        if owner.value == process.pid:
+            user32.PostMessageW(window, 0x0010, 0, 0)  # WM_CLOSE
+        return True
+
+    user32.EnumWindows(close_window, 0)
+
+
+def terminate_overlay(process):
+    if process.poll() is None:
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
 
 
 def editor_command(project=None, library=None):
@@ -440,10 +468,9 @@ def capture_controls(library, *, background=False):
         nonlocal overlay_dismissed
         if overlay is not None and overlay.poll() is None:
             overlay_dismissed = True
-            try:
-                overlay.terminate()
-            except ProcessLookupError:
-                pass
+            process = overlay
+            request_overlay_close(process)
+            root.after(1500, lambda: terminate_overlay(process))
 
     def toggle_overlay():
         if overlay is not None:
@@ -569,7 +596,11 @@ def capture_controls(library, *, background=False):
             try:
                 if overlay is not None and overlay.poll() is None:
                     stop_overlay()
-                    overlay.wait(timeout=2)
+                    try:
+                        overlay.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        terminate_overlay(overlay)
+                        overlay.wait(timeout=2)
                 if overlay is not None:
                     poll_overlay()
                     if busy:
@@ -843,7 +874,11 @@ def capture_controls(library, *, background=False):
     finally:
         stop_overlay()
         if overlay is not None:
-            overlay.wait()
+            try:
+                overlay.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                terminate_overlay(overlay)
+                overlay.wait()
         if tray:
             tray.stop()
         if hotkeys:

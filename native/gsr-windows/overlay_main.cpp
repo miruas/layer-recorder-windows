@@ -248,7 +248,6 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
                     open = false;
                 } else if (event.type == mgl::Event::LostFocus &&
                            GetForegroundWindow() != hwnd && !page.editing_hotkey()) {
-                    while (page.back()) {}
                     open = false;
                 } else if (!page.editing_hotkey() && event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape) {
                     open = page.back();
@@ -268,6 +267,7 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
                 if (result == WAIT_TIMEOUT) draw();
             }
         }
+        while (page.back()) {}
         window.set_visible(false);
     }
     gsr::deinit_color_theme();
