@@ -207,6 +207,7 @@ class Livestream:
                 command.remove("-shortest")
             command.insert(1, "-nostdin")
         if whip:
+            command.extend(["-profile:v", "baseline"])
             command.extend(["-f", "whip", "-handshake_timeout", "5000", "-timeout", "5s"])
             if destination.token:
                 command.extend(["-authorization", destination.token])
