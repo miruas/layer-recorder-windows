@@ -114,6 +114,14 @@ static int test(const std::string &resources) {
         unsigned char pixel[4]{};
         if (read) read(60, 360 - 33, 1, 1, 0x1908, 0x1401, pixel);
         if (pixel[0] != 118 || pixel[1] != 185 || pixel[2]) result = 4;
+        // The replay sprite has a transparent corner and an opaque center.
+        // A flat white rectangle here means the GL texture state is missing.
+        if (read) {
+            unsigned char corner[4]{}, center[4]{};
+            read(93, 360 - 72, 1, 1, 0x1908, 0x1401, corner);
+            read(122, 360 - 102, 1, 1, 0x1908, 0x1401, center);
+            if (corner[0] >= 32 || center[0] <= 224) result = 7;
+        }
         PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(60, 175));
         drain(window, button);
         button.draw(window, {0, 0});

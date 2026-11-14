@@ -449,6 +449,10 @@ bool layer_mgl_win32_init(mgl_window *self, const char *name, const mgl_window_c
     mgl_window_set_view(self, &(mgl_view){{0, 0}, size});
     mgl_window_set_scissor(self, &(mgl_scissor){{0, 0}, size});
     context.gl.glEnable(GL_SCISSOR_TEST);
+    context.gl.glEnable(GL_TEXTURE_2D);
+    context.gl.glEnableClientState(GL_VERTEX_ARRAY);
+    context.gl.glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    context.gl.glEnableClientState(GL_COLOR_ARRAY);
     context.gl.glEnable(GL_BLEND);
     context.gl.glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     title(self, name);
