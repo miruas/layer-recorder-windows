@@ -166,6 +166,25 @@ def scale_video(command, resolution):
     return command
 
 
+def set_capture_cursor(command, enabled):
+    if enabled is None:
+        return command
+    if "-draw_mouse" in command:
+        command[command.index("-draw_mouse") + 1] = str(int(enabled))
+    elif "gdigrab" in command:
+        index = command.index("-i")
+        command[index:index] = ["-draw_mouse", str(int(enabled))]
+    elif "lavfi" in command:
+        index = command.index("-i") + 1
+        command[index] += f":draw_mouse={int(enabled)}"
+    return command
+
+
+def video_cursor(options):
+    value = options.get("record_cursor") if isinstance(options, dict) else None
+    return value if type(value) is bool else None
+
+
 def capture_binary():
     return Path(os.environ.get("LAYER_CAPTURE_BINARY", APP / "bin/layer-capture.exe"))
 
@@ -271,7 +290,7 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
 class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
-                 follow_application_audio=False, fixed_region=None, resolution=None):
+                 follow_application_audio=False, fixed_region=None, resolution=None, cursor=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -291,6 +310,7 @@ class Capture:
         self.follow_displays = follow_displays
         self.fixed_region = fixed_region
         self.resolution = resolution
+        self.cursor = cursor
         self.fixed_windows = [source for source in selected if source.window]
         self.follow_application_audio = follow_application_audio
         self.tracks = []
@@ -336,6 +356,7 @@ class Capture:
             backend = self._backend(source)
             command = (desktop_duplication_command(source, self.fps) if backend == "ddagrab"
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
+            set_capture_cursor(command, self.cursor)
             stem, timescale = "display", TIMESCALE
         else:
             from .windows_audio import AUDIO_TIMESCALE, capture_audio_command
