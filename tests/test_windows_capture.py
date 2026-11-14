@@ -9,11 +9,24 @@ from unittest.mock import patch
 
 from katman.common import load_project, probe
 from katman.export import export_project
-from katman.windows_capture import Capture, Display, capture_binary, capture_command, desktop_duplication_command
+from katman.windows_capture import (
+    Capture, Display, capture_binary, capture_command, desktop_duplication_command, gsr_h264_encoder,
+)
 from katman.windows_audio import AudioSource
 
 
 class ReplayTests(unittest.TestCase):
+    def test_gsr_auto_selects_working_nvenc_and_respects_explicit_encoder(self):
+        with patch("katman.windows_capture.subprocess.run") as run:
+            self.assertEqual(gsr_h264_encoder({"video_codec": "h264_software"}, "h264_nvenc"), "libx264")
+            self.assertEqual(gsr_h264_encoder({"video_codec": "auto"}, "h264_qsv"), "h264_qsv")
+            run.assert_not_called()
+            run.return_value.returncode = 0
+            self.assertEqual(gsr_h264_encoder({"video_codec": "auto"}, "libx264"), "h264_nvenc")
+            self.assertIn("h264_nvenc", run.call_args.args[0])
+            run.return_value.returncode = 1
+            self.assertEqual(gsr_h264_encoder({"video_codec": "auto"}, "libx264"), "libx264")
+
     def test_left_monitor_capture_uses_signed_origin(self):
         args = capture_command(Display("Left", -1280, -50, 1280, 720), 30, "libx264")
         self.assertEqual(args[args.index("-offset_x") + 1], "-1280")

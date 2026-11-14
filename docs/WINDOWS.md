@@ -41,6 +41,8 @@ Global shortcuts are enabled by default while Layer runs, including in the notif
 
 The bundled overlay uses the original Layer-patched GSR interface for Replay, Record, Livestream, Recordings and settings. It opens above the desktop and borderless windows. Exclusive fullscreen applications control their own display mode. Use the global recording and replay shortcuts in that mode. Another application may already own Alt+Z, in which case Layer reports the conflict and the tray menu can still open the panel.
 
+With GSR's **Auto** or **H264** codec, Layer uses NVIDIA NVENC when a short encode confirms that it can start. An explicit hardware choice in the recorder takes precedence. Choose **H264 Software Encoder** in GSR to force software encoding.
+
 ## Edit and export
 
 Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` directory together. Choose **Open editor** to browse the library or open an existing project. Studio mixes enabled audio tracks during timeline playback. **Record voiceover** captures the selected microphone and inserts a separate audio clip at the playhead.

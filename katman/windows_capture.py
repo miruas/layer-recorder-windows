@@ -141,6 +141,26 @@ def foreground_window():
     return user32.GetForegroundWindow()
 
 
+def gsr_h264_encoder(options, selected):
+    """Resolve the GSR H.264 setting against the actual Windows encoder."""
+    codec = options.get("video_codec", "auto") if isinstance(options, dict) else "auto"
+    if codec == "h264_software":
+        return "libx264"
+    if selected != "libx264" or codec not in ("auto", "h264"):
+        return selected
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+             "-f", "lavfi", "-i", "color=c=black:s=640x360:r=60",
+             "-frames:v", "1", "-c:v", "h264_nvenc", "-preset", "p3", "-f", "null", "-"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return selected
+    return "h264_nvenc" if result.returncode == 0 else selected
+
+
 def window_source(handle):
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]

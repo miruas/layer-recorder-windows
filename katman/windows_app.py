@@ -17,7 +17,8 @@ import time
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
-    ac_power_connected, replay_durations, running_steam_game, video_cursor, video_rate_control, video_resolution, window_source,
+    ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
+    video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -343,6 +344,7 @@ def capture_controls(library, *, background=False):
         save_lengths = {}
         recording_directory = replay_directory = library
         configured_tracks = None
+        record_options = None
         chosen_monitor = False
         if use_gsr:
             settings = gsr_settings(kind)
@@ -413,7 +415,9 @@ def capture_controls(library, *, background=False):
         follow_screens = follow_displays.get() and not chosen_monitor and region is None
         replay_save_lengths = save_lengths
         status.set("Starting capture…")
-        submit(kind, lambda: Capture(recording_directory, selected, rate, codec, seconds=seconds, record=kind == "record",
+        submit(kind, lambda: Capture(recording_directory, selected, rate,
+                                     gsr_h264_encoder(record_options, codec) if use_gsr else codec,
+                                     seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
                                      follow_application_audio=follow_audio, fixed_region=region,
                                      resolution=resolution, cursor=cursor, color_range=color_range,
@@ -458,7 +462,7 @@ def capture_controls(library, *, background=False):
         def publish():
             audio = stream_audio_sources(settings, read_audio_inventory())
             options = settings.get("record_options")
-            return Livestream(source, rate, codec, destination, audio,
+            return Livestream(source, rate, gsr_h264_encoder(options, codec), destination, audio,
                               resolution=video_resolution(options), cursor=video_cursor(options),
                               color_range=video_color_range(options), rate_control=video_rate_control(options))
 
