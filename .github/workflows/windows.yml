@@ -8,6 +8,8 @@ jobs:
   capture:
     runs-on: windows-latest
     timeout-minutes: 25
+    env:
+      GALLIUM_DRIVER: llvmpipe
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

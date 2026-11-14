@@ -47,16 +47,16 @@ $a = $loader.IndexOf('    dlerror();')
 $b = $loader.IndexOf('    return sym;', $a)
 if ($a -lt 0 -or $b -le $a) { throw 'Could not find the MGL symbol loader.' }
 $resolve = @(
-    '    (void)required;'
     '    void *sym = (void *)GetProcAddress((HMODULE)handle, name);'
     '    if (!sym) {'
     '        sym = (void *)wglGetProcAddress(name);'
     '        if ((intptr_t)sym == -1 || (uintptr_t)sym <= 3) sym = NULL;'
     '    }'
+    '    if (!sym && required) fprintf(stderr, "Required OpenGL symbol not available: %s\n", name);'
 ) -join [Environment]::NewLine
 $loader = $loader.Substring(0, $a) + $resolve + [Environment]::NewLine + $loader.Substring($b)
 $gl = Join-Path $build 'gl_loader.c'
-Set-Content $gl -Value (@('#include <windows.h>', '#include <mgl/gl.h>', '#include <string.h>') + $loader + @(
+Set-Content $gl -Value (@('#include <windows.h>', '#include <mgl/gl.h>', '#include <stdio.h>', '#include <string.h>') + $loader + @(
     'int mgl_gl_load(mgl_gl *self) {'
     '    memset(self, 0, sizeof(*self));'
     '    self->gl_library = GetModuleHandleW(L"opengl32.dll");'

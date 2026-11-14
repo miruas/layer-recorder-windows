@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <wchar.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <mgl/mgl.h>
 #include <mgl/window/window.h>
 #include <mgl/window/event.h>
@@ -415,9 +416,15 @@ bool layer_mgl_win32_init(mgl_window *self, const char *name, const mgl_window_c
         .cDepthBits=params && params->request_depth_buffer ? 24 : 0,
         .cStencilBits=params && params->request_stencil_buffer ? 8 : 0};
     int format = ChoosePixelFormat(window->dc, &pfd);
-    if (!format || !SetPixelFormat(window->dc, format, &pfd)) goto fail;
+    if (!format || !SetPixelFormat(window->dc, format, &pfd)) {
+        fprintf(stderr, "Could not set the Win32 OpenGL pixel format (error %lu).\n", GetLastError());
+        goto fail;
+    }
     window->gl = wglCreateContext(window->dc);
-    if (!window->gl || !wglMakeCurrent(window->dc, window->gl)) goto fail;
+    if (!window->gl || !wglMakeCurrent(window->dc, window->gl)) {
+        fprintf(stderr, "Could not activate the Win32 OpenGL context (error %lu).\n", GetLastError());
+        goto fail;
+    }
     context.current_window = self;
     if (mgl_gl_load(&context.gl) != 0) goto fail;
     self->get_system_handle = handle;
