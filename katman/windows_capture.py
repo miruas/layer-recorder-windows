@@ -190,6 +190,51 @@ def video_color_range(options):
     return {"full": "pc", "limited": "tv"}.get(value) if isinstance(value, str) else None
 
 
+def video_rate_control(options):
+    if not isinstance(options, dict):
+        return None
+    quality = options.get("video_quality")
+    if quality == "custom":
+        bitrate = options.get("video_bitrate")
+        if type(bitrate) is not int or not 1 <= bitrate <= 500000:
+            raise ValueError("Set a video bitrate between 1 and 500000 Kbps in GSR.")
+        return ("cbr", bitrate)
+    levels = {"medium": 30, "high": 26, "very_high": 21, "ultra": 16}
+    if isinstance(quality, str) and quality in levels:
+        return ("quality", levels[quality])
+    return None
+
+
+def set_video_rate_control(command, settings):
+    if settings is None:
+        return
+    mode, value = settings
+    codec_pos = command.index("-c:v")
+    encoder = command[codec_pos + 1]
+    if mode == "cbr":
+        end = command.index("-bf", codec_pos)
+        preserved = []
+        for index in range(codec_pos + 2, end, 2):
+            if command[index] in ("-preset", "-tune", "-quality"):
+                preserved.extend(command[index:index + 2])
+        bitrate = f"{value}k"
+        controls = {
+            "libx264": ["-x264-params", "nal-hrd=cbr"],
+            "h264_nvenc": ["-rc", "cbr"],
+            "h264_amf": ["-rc", "cbr"],
+            "h264_qsv": [],
+        }
+        command[codec_pos + 2:end] = preserved + controls[encoder] + [
+            "-b:v", bitrate, "-minrate", bitrate, "-maxrate", bitrate, "-bufsize", f"{value * 2}k",
+        ]
+    elif encoder == "h264_amf":
+        index = command.index("-b:v", codec_pos)
+        command[index:index + 2] = ["-rc", "cqp", "-qp_i", str(value), "-qp_p", str(value)]
+    else:
+        flag = {"libx264": "-crf", "h264_nvenc": "-cq", "h264_qsv": "-global_quality"}[encoder]
+        command[command.index(flag, codec_pos) + 1] = str(value)
+
+
 def set_video_color_range(command, color_range):
     if color_range is None:
         return
@@ -310,7 +355,7 @@ class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
-                 color_range=None):
+                 color_range=None, rate_control=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -332,6 +377,7 @@ class Capture:
         self.resolution = resolution
         self.cursor = cursor
         self.color_range = color_range
+        self.rate_control = rate_control
         self.fixed_windows = [source for source in selected if source.window]
         self.follow_application_audio = follow_application_audio
         self.tracks = []
@@ -379,6 +425,7 @@ class Capture:
             command = (desktop_duplication_command(source, self.fps) if backend == "ddagrab"
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             set_capture_cursor(command, self.cursor)
+            set_video_rate_control(command, self.rate_control)
             if backend == "gdigrab":
                 set_video_color_range(command, self.color_range)
             stem, timescale = "display", TIMESCALE

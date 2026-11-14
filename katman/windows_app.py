@@ -15,7 +15,7 @@ import time
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, video_color_range,
-    video_cursor, video_resolution, window_source,
+    video_cursor, video_rate_control, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -286,6 +286,7 @@ def capture_controls(library, *, background=False):
         resolution = None
         cursor = None
         color_range = None
+        rate_control = None
         configured_tracks = None
         chosen_monitor = False
         if use_gsr:
@@ -295,6 +296,7 @@ def capture_controls(library, *, background=False):
             color_range = video_color_range(record_options)
             try:
                 resolution = video_resolution(record_options)
+                rate_control = video_rate_control(record_options)
             except ValueError as error:
                 status.set(str(error))
                 show()
@@ -361,7 +363,8 @@ def capture_controls(library, *, background=False):
         submit(kind, lambda: Capture(library, selected, rate, codec, seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
                                      follow_application_audio=follow_audio, fixed_region=region,
-                                     resolution=resolution, cursor=cursor, color_range=color_range))
+                                     resolution=resolution, cursor=cursor, color_range=color_range,
+                                     rate_control=rate_control))
 
     def stop():
         status.set("Finishing capture…")
@@ -403,7 +406,7 @@ def capture_controls(library, *, background=False):
             options = settings.get("record_options")
             return Livestream(source, rate, codec, destination, audio,
                               resolution=video_resolution(options), cursor=video_cursor(options),
-                              color_range=video_color_range(options))
+                              color_range=video_color_range(options), rate_control=video_rate_control(options))
 
         submit("stream_start", publish)
 
