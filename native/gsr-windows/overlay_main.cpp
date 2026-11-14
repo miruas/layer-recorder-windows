@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <windows.h>
+#include <algorithm>
 #include "front_page.hpp"
 #include "Theme.hpp"
 #include "Translation.hpp"
@@ -49,6 +50,67 @@ bool capture_backdrop(const RECT &bounds, mgl::Texture &texture) {
     return loaded;
 }
 
+void select_region(mgl::Window &window, const RECT &bounds, mgl::Texture &backdrop) {
+    const auto hwnd = reinterpret_cast<HWND>(window.get_system_handle());
+    const auto size = window.get_size();
+    mgl::Sprite desktop(&backdrop);
+    mgl::vec2i anchor{}, point{};
+    bool dragging = false;
+    const auto draw = [&] {
+        window.clear();
+        window.draw(desktop);
+        mgl::Rectangle shade(size.to_vec2f());
+        shade.set_color({0, 0, 0, 100});
+        window.draw(shade);
+        if (dragging) {
+            const int x = std::min(anchor.x, point.x);
+            const int y = std::min(anchor.y, point.y);
+            mgl::Rectangle selection({float(x), float(y)},
+                {float(std::abs(point.x - anchor.x)), float(std::abs(point.y - anchor.y))});
+            selection.set_color({255, 255, 255, 80});
+            window.draw(selection);
+        }
+        window.display();
+    };
+    const auto clamp = [&](int x, int y) {
+        return mgl::vec2i{std::clamp(x, 0, size.x), std::clamp(y, 0, size.y)};
+    };
+    draw();
+    window.set_visible(true);
+    SetClassLongPtrW(hwnd, GCLP_HCURSOR, reinterpret_cast<LONG_PTR>(LoadCursorW(nullptr, MAKEINTRESOURCEW(32515))));
+    SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(32515)));
+    while (window.is_open()) {
+        mgl::Event event;
+        while (window.poll_event(event)) {
+            if (event.type == mgl::Event::Closed || event.type == mgl::Event::LostFocus ||
+                (event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape))
+                return;
+            if (event.type == mgl::Event::MouseButtonPressed && event.mouse_button.button == mgl::Mouse::Left) {
+                anchor = point = clamp(event.mouse_button.x, event.mouse_button.y);
+                dragging = true;
+                SetCapture(hwnd);
+            } else if (dragging && event.type == mgl::Event::MouseMoved) {
+                point = clamp(event.mouse_move.x, event.mouse_move.y);
+            } else if (dragging && event.type == mgl::Event::MouseButtonReleased && event.mouse_button.button == mgl::Mouse::Left) {
+                point = clamp(event.mouse_button.x, event.mouse_button.y);
+                ReleaseCapture();
+                dragging = false;
+                const int width = std::abs(point.x - anchor.x);
+                const int height = std::abs(point.y - anchor.y);
+                if (width >= 2 && height >= 2) {
+                    window.set_visible(false);
+                    std::printf("region %d %d %d %d\n",
+                        static_cast<int>(bounds.left) + std::min(anchor.x, point.x),
+                        static_cast<int>(bounds.top) + std::min(anchor.y, point.y), width, height);
+                    return;
+                }
+            }
+            draw();
+        }
+        if (window.is_open()) MsgWaitForMultipleObjectsEx(0, nullptr, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    }
+}
+
 int show_overlay(const std::string &resources, std::wstring_view mode) {
     mgl::Window window;
     mgl::Window::CreateParams params;
@@ -61,6 +123,10 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
     if (!GetWindowRect(hwnd, &bounds)) return 3;
     mgl::Texture backdrop;
     if (!capture_backdrop(bounds, backdrop)) return 4;
+    if (mode == L"region") {
+        select_region(window, bounds, backdrop);
+        return 0;
+    }
     if (!gsr::init_theme(resources)) return 5;
 
     gsr::GsrInfo info{};

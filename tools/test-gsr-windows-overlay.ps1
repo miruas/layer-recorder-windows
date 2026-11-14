@@ -1,7 +1,8 @@
 param(
     [string]$Toolchain = 'C:/msys64/ucrt64/bin',
     [string]$OverlayDirectory = '',
-    [switch]$SelectRecordings
+    [switch]$SelectRecordings,
+    [switch]$SelectRegion
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -57,6 +58,7 @@ if ($OverlayDirectory) {
 }
 $launch = [System.Diagnostics.ProcessStartInfo]::new($exe)
 $launch.ArgumentList.Add($source)
+if ($SelectRegion) { $launch.ArgumentList.Add('region') }
 $launch.UseShellExecute = $false
 $launch.RedirectStandardOutput = $true
 $process = [System.Diagnostics.Process]::Start($launch)
@@ -75,7 +77,15 @@ try {
         $bounds.Right -ne $info.Bounds.Right -or $bounds.Bottom -ne $info.Bounds.Bottom) {
         throw 'The overlay did not cover the cursor monitor.'
     }
-    if ($SelectRecordings) {
+    if ($SelectRegion) {
+        $start = [IntPtr]((250 -shl 16) -bor 300)
+        $end = [IntPtr]((70 -shl 16) -bor 100)
+        if (![GsrOverlayTest]::PostMessage($window, 0x201, [IntPtr]1, $start) -or
+            ![GsrOverlayTest]::PostMessage($window, 0x200, [IntPtr]1, $end) -or
+            ![GsrOverlayTest]::PostMessage($window, 0x202, [IntPtr]0, $end)) {
+            throw 'Could not drag the screenshot region.'
+        }
+    } elseif ($SelectRecordings) {
         $height = $bounds.Bottom - $bounds.Top
         $width = $bounds.Right - $bounds.Left
         $cardSize = [int][Math]::Floor($height / 5)
@@ -93,7 +103,11 @@ try {
     }
     if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'The overlay did not close cleanly.' }
     $action = $process.StandardOutput.ReadToEnd().Trim()
-    if ($SelectRecordings) {
+    if ($SelectRegion) {
+        $expected = "region $($bounds.Left + 100) $($bounds.Top + 70) 200 180"
+        if ($action -ne $expected) { throw "Expected '$expected', received '$action'." }
+        Write-Host 'The native overlay returned the selected desktop region.'
+    } elseif ($SelectRecordings) {
         if ($action -ne 'recordings') { throw "Unexpected overlay action '$action'." }
         Write-Host 'The native overlay returned the Recordings action.'
     } else {

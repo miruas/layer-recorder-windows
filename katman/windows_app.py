@@ -305,16 +305,19 @@ def capture_controls(library, *, background=False):
                 pass
 
     def toggle_overlay():
-        nonlocal overlay, overlay_dismissed
         if overlay is not None:
             stop_overlay()
-            return
+        else:
+            launch_overlay(mode or "idle")
+
+    def launch_overlay(overlay_mode):
+        nonlocal overlay, overlay_dismissed
         executable = APP / "overlay/layer-gsr-overlay.exe"
         resources = APP / "overlay/resources"
         try:
             overlay_dismissed = False
             overlay = subprocess.Popen(
-                [str(executable), str(resources), mode or "idle"],
+                [str(executable), str(resources), overlay_mode],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
@@ -337,20 +340,42 @@ def capture_controls(library, *, background=False):
             open_editor()
         elif action == b"settings":
             show()
+        elif not busy and action.startswith(b"region "):
+            from .windows_screenshot import desktop_source, screenshot_settings, take_screenshot
+
+            bounds = action.split()[1:]
+            if len(bounds) == 4:
+                try:
+                    source = desktop_source(*(int(value) for value in bounds))
+                except ValueError:
+                    status.set("The GSR region coordinates were invalid.")
+                    return
+                settings = screenshot_settings()
+                clipboard_owner = root.winfo_id()
+                submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
         elif not busy and action in {b"toggle_record", b"toggle_replay", b"save_replay", b"save_short", b"save_long"}:
             handle_hotkey(action.decode("ascii"))
 
     def handle_hotkey(action):
         if action == "toggle_overlay":
             toggle_overlay()
-        elif action in {"screenshot", "screenshot_window"}:
+        elif action in {"screenshot", "screenshot_window", "screenshot_region"}:
             from .windows_screenshot import screenshot_settings, screenshot_source, take_screenshot
 
             try:
                 if overlay is not None and overlay.poll() is None:
                     stop_overlay()
                     overlay.wait(timeout=2)
+                if overlay is not None:
+                    poll_overlay()
+                    if busy:
+                        return
                 settings = screenshot_settings()
+                if action == "screenshot_region" or (
+                    action == "screenshot" and settings.get("record_area_option") == "region"
+                ):
+                    launch_overlay("region")
+                    return
                 source = screenshot_source(settings, action)
                 clipboard_owner = root.winfo_id()
                 submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))

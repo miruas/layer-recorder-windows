@@ -16,6 +16,7 @@ HOTKEYS = {
 SCREENSHOT_HOTKEYS = {
     0x2C: (0, "screenshot", "Print Screen"),
     0x12C: (0x0004, "screenshot_window", "Shift+Print Screen"),
+    0x22C: (0x0002, "screenshot_region", "Ctrl+Print Screen"),
 }
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012

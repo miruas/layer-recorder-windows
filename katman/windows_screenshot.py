@@ -52,8 +52,12 @@ def screenshot_source(settings, target):
             user32.SetThreadDpiAwarenessContext(previous)
         monitor = next((item for item in monitors if item.x <= point.x < item.x + item.width
                         and item.y <= point.y < item.y + item.height), monitors[0])
-    return ["-offset_x", str(monitor.x), "-offset_y", str(monitor.y),
-            "-video_size", f"{monitor.width}x{monitor.height}", "-i", "desktop"]
+    return desktop_source(monitor.x, monitor.y, monitor.width, monitor.height)
+
+
+def desktop_source(x, y, width, height):
+    return ["-offset_x", str(x), "-offset_y", str(y),
+            "-video_size", f"{width}x{height}", "-i", "desktop"]
 
 
 def copy_image_to_clipboard(image_bytes, owner):

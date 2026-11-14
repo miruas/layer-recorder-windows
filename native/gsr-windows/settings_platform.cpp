@@ -8,6 +8,7 @@ namespace gsr {
 SupportedCaptureOptions get_supported_capture_options(const GsrInfo &) {
     SupportedCaptureOptions options;
     options.window = true;
+    options.region = true;
     EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR monitor, HDC, LPRECT, LPARAM data) -> BOOL {
         MONITORINFOEXW info{};
         info.cbSize = sizeof(info);
