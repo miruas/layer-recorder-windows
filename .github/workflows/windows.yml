@@ -50,12 +50,12 @@ jobs:
         with:
           msystem: UCRT64
           location: '${{ runner.temp }}/layer-msys2'
-          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-pango
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-pango mingw-w64-ucrt-x86_64-mesa
         id: overlay-toolchain
       - name: Build and test the original GSR overlay
         run: |
           & {
-            ./tools/test-gsr-windows-widgets.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay
+            ./tools/test-gsr-windows-widgets.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay -SoftwareOpenGL
           } *>&1 | Tee-Object -FilePath overlay-build.log
       - name: Upload overlay build diagnostics
         if: failure()
@@ -65,7 +65,7 @@ jobs:
           path: overlay-build.log
           if-no-files-found: ignore
       - name: Verify overlay settings survive closing
-        run: ./tools/test-gsr-windows-overlay.ps1 -OverlayDirectory build/native/windows-overlay-package/overlay -CloseSettings
+        run: ./tools/test-gsr-windows-overlay.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay -CloseSettings -SoftwareOpenGL
       - name: Package the Windows build
         if: github.event_name == 'push'
         run: |

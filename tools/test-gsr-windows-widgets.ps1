@@ -1,6 +1,7 @@
 param(
     [string]$Toolchain = 'C:/msys64/ucrt64/bin',
-    [string]$OverlayDirectory = ''
+    [string]$OverlayDirectory = '',
+    [switch]$SoftwareOpenGL
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -61,13 +62,20 @@ $testObjects[$cSources.Count] = $testConfig
 & $cxx -std=c++17 -O2 @includes "$port/gsr_widget_smoke.cpp" @testObjects @libs @windowsLibs -o $exe
 if ($LASTEXITCODE -ne 0) { throw 'Could not link the GSR widget test.' }
 $env:LAYER_GSR_TEST_CONFIG_DIR = Join-Path $build 'widget-test-config'
+$softwareDll = Join-Path $build 'opengl32.dll'
 try {
+    if ($SoftwareOpenGL) {
+        Copy-Item -LiteralPath (Join-Path $Toolchain 'opengl32.dll') -Destination $softwareDll
+    }
     & $exe $source
     if ($LASTEXITCODE -ne 0) { throw "GSR widget test failed with exit code $LASTEXITCODE." }
     if (!(Test-Path -LiteralPath "$env:LAYER_GSR_TEST_CONFIG_DIR/config_ui")) {
         throw 'The screenshot settings page did not save its configuration.'
     }
 } finally {
+    if ($SoftwareOpenGL -and (Test-Path -LiteralPath $softwareDll)) {
+        Remove-Item -LiteralPath $softwareDll
+    }
     Remove-Item Env:LAYER_GSR_TEST_CONFIG_DIR
 }
 $overlay = Join-Path $build 'layer-gsr-overlay.exe'
@@ -97,6 +105,8 @@ if ($OverlayDirectory) {
         foreach ($line in $imports) {
             if ($line -notmatch 'DLL Name:\s+(\S+\.dll)$') { continue }
             $dll = $Matches[1]
+            # The shipped overlay uses the system OpenGL driver.
+            if ($dll -ieq 'opengl32.dll') { continue }
             $file = Join-Path $Toolchain $dll
             if ((Test-Path -LiteralPath $file) -and $copied.Add($dll)) {
                 Copy-Item -LiteralPath $file -Destination $OverlayDirectory -Force

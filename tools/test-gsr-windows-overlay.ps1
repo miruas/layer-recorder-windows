@@ -3,7 +3,8 @@ param(
     [string]$OverlayDirectory = '',
     [switch]$SelectRecordings,
     [switch]$SelectRegion,
-    [switch]$CloseSettings
+    [switch]$CloseSettings,
+    [switch]$SoftwareOpenGL
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -68,8 +69,14 @@ if ($CloseSettings) {
     $configFile = Join-Path $configDirectory.FullName 'config_ui'
     $launch.Environment['LAYER_GSR_CONFIG'] = $configFile
 }
-$process = [System.Diagnostics.Process]::Start($launch)
+$process = $null
+$softwareDll = Join-Path (Split-Path -Parent $exe) 'opengl32.dll'
 try {
+    if ($SoftwareOpenGL) {
+        Copy-Item -LiteralPath (Join-Path $Toolchain 'opengl32.dll') -Destination $softwareDll
+        $launch.Environment['Path'] = "$Toolchain;$env:Path"
+    }
+    $process = [System.Diagnostics.Process]::Start($launch)
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 100
@@ -138,8 +145,16 @@ try {
         Write-Host 'The native GSR overlay covered the cursor monitor and closed on Escape.'
     }
 } finally {
-    if (!$process.HasExited) { $process.Kill() }
-    $process.Dispose()
+    if ($process) {
+        if (!$process.HasExited) {
+            $process.Kill()
+            $process.WaitForExit()
+        }
+        $process.Dispose()
+    }
+    if ($SoftwareOpenGL -and (Test-Path -LiteralPath $softwareDll)) {
+        Remove-Item -LiteralPath $softwareDll
+    }
     if ($configDirectory) {
         if (Test-Path -LiteralPath $configFile) { Remove-Item -LiteralPath $configFile }
         $configDirectory.Delete()
