@@ -2,6 +2,7 @@
 """Publish a Windows capture using the GSR streaming destination."""
 import subprocess
 import threading
+import time
 from queue import Empty, Full, Queue
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
@@ -111,6 +112,8 @@ def mix_audio(sources, output, stop):
     def read(source, sink):
         try:
             capture_pcm(source, sink, stop)
+            if not stop.is_set():
+                raise RuntimeError(f"{source.name}: Windows audio capture ended.")
         except Exception as error:
             errors.put(error)
             stop.set()
@@ -123,11 +126,14 @@ def mix_audio(sources, output, stop):
     try:
         while not stop.is_set():
             mixed = np.zeros(block_size // 2, dtype=np.int32)
-            for sink in inputs:
+            for source, sink in zip(sources, inputs):
+                deadline = time.monotonic() + 3
                 while not stop.is_set():
                     try:
                         block = sink.blocks.get(timeout=.1)
                     except Empty:
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError(f"{source.name}: Windows audio capture stopped responding.")
                         continue
                     mixed += np.frombuffer(block, dtype="<i2")
                     break
