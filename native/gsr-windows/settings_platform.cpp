@@ -8,6 +8,40 @@
 #include <algorithm>
 
 namespace gsr {
+std::string GsrVersion::to_string() const {
+    return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(patch);
+}
+
+static constexpr auto run_key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+bool is_windows_autostart_enabled() {
+    return RegGetValueW(HKEY_CURRENT_USER, run_key, L"LayerRecorder", RRF_RT_REG_SZ,
+                        nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+}
+
+int set_windows_autostart(bool enabled) {
+    wchar_t module[32768];
+    const auto length = GetModuleFileNameW(nullptr, module, std::size(module));
+    if (!length || length == std::size(module)) return ERROR_BAD_PATHNAME;
+    const auto launcher = std::filesystem::path(module).parent_path().parent_path() / L"Layer.exe";
+    if (enabled && !std::filesystem::is_regular_file(launcher)) return ERROR_FILE_NOT_FOUND;
+    HKEY key;
+    const auto result = RegCreateKeyExW(HKEY_CURRENT_USER, run_key, 0, nullptr, 0,
+                                      KEY_SET_VALUE, nullptr, &key, nullptr);
+    if (result != ERROR_SUCCESS) return result;
+    LSTATUS status;
+    if (enabled) {
+        const auto command = L"\"" + launcher.wstring() + L"\" --background";
+        status = RegSetValueExW(key, L"LayerRecorder", 0, REG_SZ,
+                                reinterpret_cast<const BYTE *>(command.c_str()),
+                                static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+    } else {
+        status = RegDeleteValueW(key, L"LayerRecorder");
+        if (status == ERROR_FILE_NOT_FOUND) status = ERROR_SUCCESS;
+    }
+    RegCloseKey(key);
+    return status;
+}
 static std::string audio_inventory() {
     const auto *inventory = _wgetenv(L"LAYER_GSR_AUDIO_INVENTORY");
     if (!inventory) return {};

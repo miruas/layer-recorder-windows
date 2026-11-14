@@ -242,7 +242,7 @@ def capture_controls(library, *, background=False):
 
     def apply_hotkeys():
         nonlocal hotkeys
-        if hotkey_setting.get():
+        if hotkey_setting.get() and gsr_settings("main").get("hotkeys_enable_option") != "disable_hotkeys":
             bindings, unsupported = hotkey_bindings(gsr_settings)
             if hotkeys:
                 if (hotkeys.bindings, hotkeys.unsupported) == (bindings, unsupported):
@@ -487,6 +487,8 @@ def capture_controls(library, *, background=False):
             open_editor()
         elif action == b"settings":
             show()
+        elif action == b"exit":
+            close()
         elif not busy and action.startswith(b"region "):
             from .windows_screenshot import desktop_source, screenshot_settings, take_screenshot
 
@@ -736,6 +738,8 @@ def capture_controls(library, *, background=False):
 
         if not closing:
             poll_overlay()
+            if closing and not busy:
+                return
         if stream is not None and not busy and stream.poll() is not None:
             error = stream.audio_error
             stream.stop()

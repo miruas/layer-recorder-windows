@@ -56,6 +56,10 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     send(WM_LBUTTONUP, 403, 90);
     // Going back must return to the home page, then close the home page.
     if (!page.back() || page.back()) return false;
+    page.resize({480, 360});
+    send(WM_LBUTTONDOWN, 403, 114);
+    send(WM_LBUTTONUP, 403, 114);
+    if (!page.back() || page.back()) return false;
 
     // Exercise the original settings constructors and save hooks with the
     // same platform adapters used by the running overlay.

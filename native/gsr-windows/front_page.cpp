@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "front_page.hpp"
+#include "global_settings_generated.hpp"
+#include <windows.h>
+#include <filesystem>
 #include "Theme.hpp"
 #include "Translation.hpp"
 #include "gui/DropdownButton.hpp"
@@ -26,10 +29,28 @@ void WindowsFrontPage::open_capture_settings(SettingsPage::Type type) {
     page_stack.push(std::make_unique<SettingsPage>(type, &gsr_info, config, &page_stack, false));
 }
 
+void WindowsFrontPage::open_settings_page() {
+    auto settings = std::make_unique<GlobalSettingsPage>(this, &gsr_info, config, &page_stack);
+    settings->on_click_exit_program_button = [this](std::string_view) {
+        action(FrontPageAction::exit_application);
+    };
+    page_stack.push(std::move(settings));
+}
+
+void WindowsFrontPage::show_hotkey_error(const std::string &message) {
+    MessageBoxW(GetActiveWindow(), std::filesystem::u8path(message).c_str(),
+                L"GPU Screen Recorder", MB_OK | MB_ICONWARNING);
+}
+
 bool WindowsFrontPage::back() {
     if (page_stack.empty()) return false;
     page_stack.pop();
     return !page_stack.empty();
+}
+
+bool WindowsFrontPage::editing_hotkey() {
+    const auto *settings = dynamic_cast<const GlobalSettingsPage *>(page_stack.top());
+    return settings && settings->editing_hotkey();
 }
 
 void WindowsFrontPage::set_capture_state(bool recording, bool replay, bool paused, bool streaming) {

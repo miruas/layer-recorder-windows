@@ -153,6 +153,7 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
             case Action::stream_toggle: name = "toggle_stream"; break;
             case Action::recordings: name = "recordings"; break;
             case Action::settings: name = "settings"; break;
+            case Action::exit_application: name = "exit"; break;
             default: break;
             }
             if (name) {
@@ -181,7 +182,7 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
             while (open && window.poll_event(event)) {
                 if (event.type == mgl::Event::Closed) {
                     open = false;
-                } else if (event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape) {
+                } else if (!page.editing_hotkey() && event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape) {
                     open = page.back();
                 } else {
                     const bool page_open = page.on_event(event, window);

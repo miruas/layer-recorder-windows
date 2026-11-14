@@ -21,7 +21,8 @@ $frontPage = Join-Path $build 'front_page_generated.cpp'
 $fileChooser = Join-Path $build 'file_chooser_generated.cpp'
 & (Join-Path $PSScriptRoot 'Get-GsrWindowsFrontPage.ps1') -Source $source -OutputFile $frontPage
 & (Join-Path $PSScriptRoot 'Get-GsrWindowsFileChooser.ps1') -Source $source -OutputFile $fileChooser
-$includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port")
+& (Join-Path $PSScriptRoot 'Get-GsrWindowsGlobalSettings.ps1') -Source $source -OutputDirectory $build
+$includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port", "-I$build")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Pango and GIO headers are required.' }
 $libs = (& $pkg --libs pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }
@@ -31,7 +32,7 @@ $cSources = @("$port/mgl_win32.c", "$port/mgl_files_win32.c", "$build/window_api
 $cSources += (Get-ChildItem "$mgl/src/graphics" -Filter '*.c').FullName
 $cppSources = @("$port/config.cpp", "$build/key_names.cpp",
     "$source/src/Config.cpp", "$source/src/Theme.cpp", "$source/src/Translation.cpp",
-    "$port/front_page.cpp", "$port/settings_platform.cpp", $frontPage, $fileChooser)
+    "$port/front_page.cpp", "$port/settings_platform.cpp", $frontPage, $fileChooser, "$build/global_settings_generated.cpp")
 $cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils', 'Page', 'PageStack', 'StaticPage',
     'List', 'CustomRendererWidget', 'Label', 'Image', 'Button', 'ScreenshotSettingsPage',
     'GsrPage', 'ScrollablePage', 'Subsection', 'RadioButton', 'LineSeparator', 'ComboBox', 'CheckBox',

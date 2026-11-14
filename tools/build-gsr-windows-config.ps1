@@ -37,6 +37,9 @@ $lines = @(
     'const char *mgl::Keyboard::key_to_string(Key key) {'
     '    return mgl_key_to_string(static_cast<mgl_key>(key));'
     '}'
+    'bool mgl::Keyboard::key_is_modifier(Key key) {'
+    '    return key >= LControl && key <= RSystem;'
+    '}'
 )
 $keyFile = Join-Path $build 'key_names.cpp'
 Set-Content -LiteralPath $keyFile -Value $lines -Encoding utf8

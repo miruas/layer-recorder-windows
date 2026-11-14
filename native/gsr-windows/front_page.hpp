@@ -16,7 +16,7 @@ class DropdownButton;
 enum class FrontPageAction {
     replay_toggle, replay_save, replay_save_short, replay_save_long, replay_settings,
     record_toggle, record_pause, record_settings,
-    stream_toggle, stream_settings, recordings, settings
+    stream_toggle, stream_settings, recordings, settings, exit_application
 };
 
 class WindowsFrontPage {
@@ -26,23 +26,27 @@ public:
     void set_capture_state(bool recording, bool replay, bool paused = false, bool streaming = false);
     bool on_event(mgl::Event &event, mgl::Window &window);
     bool back();
+    bool editing_hotkey();
     void draw(mgl::Window &window);
+    void open_replay_settings_page() { open_capture_settings(SettingsPage::Type::REPLAY); }
+    void open_record_settings_page() { open_capture_settings(SettingsPage::Type::RECORD); }
+    void open_stream_settings_page() { open_capture_settings(SettingsPage::Type::STREAM); }
+    void open_screenshot_settings_page();
+    void show_hotkey_error(const std::string &message);
+    void rebind_all_keyboard_hotkeys() {}
+    void unbind_all_keyboard_hotkeys() {}
 
 private:
     void recreate_frontpage_ui_components();
-    void open_replay_settings_page() { open_capture_settings(SettingsPage::Type::REPLAY); }
     void on_press_save_replay() { action(FrontPageAction::replay_save); }
     void on_press_save_replay_1_min_replay() { action(FrontPageAction::replay_save_short); }
     void on_press_save_replay_10_min_replay() { action(FrontPageAction::replay_save_long); }
     void on_press_start_replay() { action(FrontPageAction::replay_toggle); }
-    void open_record_settings_page() { open_capture_settings(SettingsPage::Type::RECORD); }
     void toggle_pause() { action(FrontPageAction::record_pause); }
     void on_press_start_record() { action(FrontPageAction::record_toggle); }
-    void open_stream_settings_page() { open_capture_settings(SettingsPage::Type::STREAM); }
     void open_capture_settings(SettingsPage::Type type);
     void on_press_start_stream() { action(FrontPageAction::stream_toggle); }
-    void open_settings_page() { action(FrontPageAction::settings); }
-    void open_screenshot_settings_page();
+    void open_settings_page();
 
     Config &config;
     GsrInfo &gsr_info;
@@ -59,4 +63,6 @@ private:
     DropdownButton *stream_dropdown_button_ptr = nullptr;
     bool close_button_pressed_inside = false;
 };
+bool is_windows_autostart_enabled();
+int set_windows_autostart(bool enabled);
 }
