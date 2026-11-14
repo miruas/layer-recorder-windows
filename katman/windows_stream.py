@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Publish a Windows capture using the GSR streaming destination."""
 import subprocess
+import threading
 from urllib.parse import urlsplit
 
 from .windows_capture import capture_command
+from .windows_audio import AUDIO_TIMESCALE, CHANNELS, capture_pcm, gsr_audio_selection
 
 
 def stream_destination(settings):
@@ -40,29 +42,67 @@ def stream_frame_rate(settings):
     return rate if type(rate) is int and 1 <= rate <= 500 else 30
 
 
+def stream_audio_source(settings, inventory):
+    options = settings.get("record_options") or {}
+    tracks = options.get("audio_track_item", [{"audio_inputs": ["default_output"]}])
+    sources = gsr_audio_selection(tracks, inventory)
+    if len(sources) > 1:
+        raise ValueError("Select one audio source for the Windows livestream.")
+    return next(iter(sources), None)
+
+
 class Livestream:
-    def __init__(self, display, fps, encoder, destination):
+    def __init__(self, display, fps, encoder, destination, audio=None):
         command = capture_command(display, fps, encoder)
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
+        if audio is not None:
+            index = command.index("-an")
+            command[index:index + 1] = [
+                "-thread_queue_size", "64", "-f", "s16le", "-ar", str(AUDIO_TIMESCALE),
+                "-ac", str(CHANNELS), "-i", "pipe:0", "-map", "0:v:0", "-map", "1:a:0",
+                "-c:a", "aac", "-b:a", "160k", "-shortest",
+            ]
+            command.insert(1, "-nostdin")
         command.extend(["-rw_timeout", "5000000", "-f", "flv", destination])
+        self.audio_stop = threading.Event()
+        self.audio_thread = None
+        self.audio_error = None
         self.process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW,
         )
+        if audio is not None:
+            self.audio_thread = threading.Thread(target=self._feed_audio, args=(audio,), daemon=True)
+            self.audio_thread.start()
+
+    def _feed_audio(self, source):
+        try:
+            with self.process.stdin as output:
+                capture_pcm(source, output, self.audio_stop)
+        except BrokenPipeError:
+            pass
+        except OSError as error:
+            self.audio_error = str(error)
 
     def poll(self):
         return self.process.poll()
 
     def stop(self):
         try:
+            if self.audio_thread:
+                self.audio_stop.set()
             if self.poll() is None:
-                self.process.stdin.write(b"q\n")
-                self.process.stdin.flush()
+                if not self.audio_thread:
+                    self.process.stdin.write(b"q\n")
+                    self.process.stdin.flush()
                 self.process.wait(timeout=6)
         except (BrokenPipeError, subprocess.TimeoutExpired):
             if self.poll() is None:
                 self.process.kill()
             self.process.wait()
         finally:
-            self.process.stdin.close()
+            if self.audio_thread:
+                self.audio_thread.join(timeout=2)
+            else:
+                self.process.stdin.close()

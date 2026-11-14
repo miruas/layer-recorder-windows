@@ -372,17 +372,22 @@ def capture_controls(library, *, background=False):
                 return
             source = (window_source(overlay_window if from_overlay else foreground_window())
                       if target == "window" else capture_monitor(target))
-            launch_stream(source, stream_frame_rate(settings), destination)
+            launch_stream(source, stream_frame_rate(settings), destination, settings)
         except (OSError, RuntimeError, ValueError, AttributeError) as error:
             status.set(str(error))
             show()
 
-    def launch_stream(source, rate, destination):
-        from .windows_stream import Livestream
+    def launch_stream(source, rate, destination, settings):
+        from .windows_stream import Livestream, stream_audio_source
 
         codec = encoder.get()
         status.set("Starting livestream…")
-        submit("stream_start", lambda: Livestream(source, rate, codec, destination))
+
+        def publish():
+            audio = stream_audio_source(settings, read_audio_inventory())
+            return Livestream(source, rate, codec, destination, audio)
+
+        submit("stream_start", publish)
 
     def stop_overlay():
         nonlocal overlay_dismissed
@@ -455,7 +460,7 @@ def capture_controls(library, *, background=False):
 
                         try:
                             settings = gsr_settings("streaming")
-                            launch_stream(region, stream_frame_rate(settings), stream_destination(settings))
+                            launch_stream(region, stream_frame_rate(settings), stream_destination(settings), settings)
                         except (ValueError, AttributeError) as error:
                             status.set(str(error))
                             show()
@@ -675,9 +680,10 @@ def capture_controls(library, *, background=False):
         if not closing:
             poll_overlay()
         if stream is not None and not busy and stream.poll() is not None:
+            error = stream.audio_error
             stream.stop()
             stream = None
-            status.set("Livestream ended. Check the destination and stream key.")
+            status.set(error or "Livestream ended. Check the destination and stream key.")
             show()
 
         if hotkeys and not closing:
