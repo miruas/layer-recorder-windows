@@ -525,7 +525,12 @@ fn handle(
 
 fn run() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let seconds: f64 = args.next().context("Missing replay duration")?.parse()?;
+    let first = args.next().context("Missing replay duration")?;
+    #[cfg(windows)]
+    if first == "dxgi-outputs" {
+        return dxgi_outputs();
+    }
+    let seconds: f64 = first.parse()?;
     let limit: usize = args.next().context("Missing replay budget")?.parse()?;
     ensure!(
         seconds.is_finite() && seconds > 0.0 && limit > 0,
@@ -560,6 +565,40 @@ fn run() -> Result<()> {
     for (_, child) in children {
         child.stop();
     }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn dxgi_outputs() -> Result<()> {
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, DXGI_ERROR_NOT_FOUND, IDXGIFactory1};
+
+    let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1()? };
+    let mut outputs = Vec::new();
+    for adapter_index in 0.. {
+        // Match FFmpeg's d3d11va adapter numbering.
+        let adapter = match unsafe { factory.EnumAdapters(adapter_index) } {
+            Ok(adapter) => adapter,
+            Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
+            Err(error) => return Err(error.into()),
+        };
+        for output_index in 0.. {
+            let output = match unsafe { adapter.EnumOutputs(output_index) } {
+                Ok(output) => output,
+                Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
+                Err(error) => return Err(error.into()),
+            };
+            let desc = unsafe { output.GetDesc()? };
+            if desc.AttachedToDesktop.as_bool() {
+                let name = String::from_utf16_lossy(&desc.DeviceName);
+                outputs.push(serde_json::json!({
+                    "name": name.trim_end_matches('\0'),
+                    "adapter": adapter_index,
+                    "output": output_index,
+                }));
+            }
+        }
+    }
+    println!("{}", serde_json::to_string(&outputs)?);
     Ok(())
 }
 

@@ -202,15 +202,20 @@ def capture_command(display, fps, encoder):
             "empty_moov+default_base_moof+frag_keyframe+skip_trailer", "-f", "mp4", "pipe:1"]
 
 
-def desktop_duplication_command(display, fps, monitor=None):
+def desktop_duplication_command(display, fps, monitor=None, target=None):
     command = capture_command(display, fps, "h264_nvenc")
     # Pass D3D11 surfaces directly to NVENC. CFR normalizes DXGI timestamps
     # to one frame per output tick before the fragmented MP4 muxer.
-    source = f"ddagrab=output_idx=0:framerate={fps}:output_fmt=bgra"
+    output = target[1] if target is not None else 0
+    source = f"ddagrab=output_idx={output}:framerate={fps}:output_fmt=bgra"
     if monitor is not None and display != monitor:
         source += (f":video_size={display.width}x{display.height}"
                    f":offset_x={display.x - monitor.x}:offset_y={display.y - monitor.y}")
-    command[4:command.index("-an")] = ["-f", "lavfi", "-i", source]
+    capture = ["-f", "lavfi", "-i", source] if target is None else [
+        "-init_hw_device", f"d3d11va=layer:{target[0]}",
+        "-filter_hw_device", "layer", "-filter_complex", source,
+    ]
+    command[4:command.index("-an")] = capture
     # Leave headroom in the default 512 MiB ring for five minutes of video,
     # independent AAC tracks and container overhead.
     rate = command.index("-b:v")
@@ -272,6 +277,8 @@ def set_capture_cursor(command, enabled):
     elif "lavfi" in command:
         index = command.index("-i") + 1
         command[index] += f":draw_mouse={int(enabled)}"
+    elif "-filter_complex" in command:
+        command[command.index("-filter_complex") + 1] += f":draw_mouse={int(enabled)}"
     return command
 
 
@@ -391,6 +398,7 @@ class Track:
     media: Path | None
     stopped: bool = False
     backend: str = "gdigrab"
+    duplication_target: tuple | None = None
 
     @property
     def kind(self):
@@ -446,6 +454,17 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
     return project
 
 
+def dxgi_targets():
+    try:
+        result = subprocess.run([str(capture_binary()), "dxgi-outputs"], check=True,
+                                capture_output=True, timeout=4,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return {row["name"].removeprefix("\\\\.\\").casefold(): (row["adapter"], row["output"])
+                for row in json.loads(result.stdout)}
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return {}
+
+
 class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
@@ -492,7 +511,8 @@ class Capture:
         self.final_project = None
         self.paused = False
         self.duplication_failed = set()
-        self.single_display = None
+        self.duplication_layout = ()
+        self.duplication_targets = {}
         if encoder == "h264_nvenc":
             try:
                 self._update_duplication_layout(displays())
@@ -513,25 +533,33 @@ class Capture:
             raise
 
     def _update_duplication_layout(self, current):
-        self.single_display = current[0] if len(current) == 1 and current[0].primary else None
+        if self.encoder != "h264_nvenc" or tuple(current) == self.duplication_layout:
+            return
+        self.duplication_layout = tuple(current)
+        self.duplication_targets = dxgi_targets() if current else {}
+        self.duplication_failed.clear()
 
-    def _backend(self, source):
-        monitor = self.single_display
-        region_on_monitor = (monitor is not None and source == self.fixed_region and
-                             monitor.x <= source.x and monitor.y <= source.y and
-                             source.x + source.width <= monitor.x + monitor.width and
-                             source.y + source.height <= monitor.y + monitor.height)
-        if (self.resolution is None and self.color_range != "pc" and self.framerate_mode != "content" and
-                self.encoder == "h264_nvenc" and (source == monitor or region_on_monitor) and
-                source.key not in self.duplication_failed and source.width % 2 == source.height % 2 == 0):
-            return "ddagrab"
-        return "gdigrab"
+    def _duplication_target(self, source):
+        if (self.encoder != "h264_nvenc" or self.resolution is not None or self.color_range == "pc" or
+                self.framerate_mode == "content" or source.key in self.duplication_failed or
+                source.width % 2 or source.height % 2):
+            return None
+        for monitor in self.duplication_layout:
+            target = self.duplication_targets.get(monitor.name.casefold())
+            if target is not None and (source == monitor or (
+                    source == self.fixed_region and monitor.x <= source.x and monitor.y <= source.y and
+                    source.x + source.width <= monitor.x + monitor.width and
+                    source.y + source.height <= monitor.y + monitor.height)):
+                return monitor, target
+        return None
 
     def _start_track(self, source):
         self.serial += 1
+        target = None
         if isinstance(source, Display):
-            backend = self._backend(source)
-            command = (desktop_duplication_command(source, self.fps, self.single_display) if backend == "ddagrab"
+            target = self._duplication_target(source)
+            backend = "ddagrab" if target else "gdigrab"
+            command = (desktop_duplication_command(source, self.fps, *target) if target
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             set_capture_cursor(command, self.cursor)
             set_video_rate_control(command, self.rate_control)
@@ -552,7 +580,7 @@ class Capture:
             if path:
                 path.unlink(missing_ok=True)
             raise
-        track = Track(self.serial, source, self.fps, path, backend=backend)
+        track = Track(self.serial, source, self.fps, path, backend=backend, duplication_target=target)
         self.tracks.append(track)
         self.active[source.key] = track
 
@@ -606,7 +634,7 @@ class Capture:
                 self.warnings.append(f"{source.name}: Desktop Duplication failed. Using GDI with NVENC.")
                 self._retire(key)
             elif (source != track.source or failure or
-                  (track.kind == "video" and track.backend != self._backend(track.source))):
+                  (track.kind == "video" and track.duplication_target != self._duplication_target(track.source))):
                 self._retire(key)
                 if failure and source == track.source:
                     self.retry_at[key] = now + 5

@@ -18,6 +18,24 @@ from katman.windows_audio import AudioSource, audio_encoder_command
 
 
 class ReplayTests(unittest.TestCase):
+    def test_monitor_and_region_resolve_by_dxgi_device_name(self):
+        primary = Display("DISPLAY1", 0, 0, 1920, 1080, True)
+        secondary = Display("DISPLAY7", -1920, 0, 1920, 1080)
+        region = Display("Selected region", -1856, 40, 640, 360)
+        with patch("katman.windows_capture.CaptureEngine"), patch(
+            "katman.windows_capture.displays", return_value=[primary, secondary]
+        ), patch("katman.windows_capture.dxgi_targets", return_value={"display7": (1, 2)}):
+            capture = Capture(tempfile.gettempdir(), [region], encoder="h264_nvenc", fixed_region=region)
+            self.assertIsNone(capture._duplication_target(primary))
+            self.assertEqual(capture._duplication_target(secondary), (secondary, (1, 2)))
+            self.assertEqual(capture._duplication_target(region), (secondary, (1, 2)))
+            command = desktop_duplication_command(region, 60, *capture._duplication_target(region))
+            self.assertIn("d3d11va=layer:1", command)
+            self.assertIn(
+                "ddagrab=output_idx=2:framerate=60:output_fmt=bgra:video_size=640x360:offset_x=64:offset_y=40",
+                command,
+            )
+
     def test_desktop_duplication_crop_uses_monitor_relative_offsets(self):
         monitor = Display("Monitor", -1920, -120, 1920, 1080, True)
         region = Display("Selected region", -1856, -80, 640, 360)
@@ -139,6 +157,7 @@ class ProjectTests(unittest.TestCase):
         monitor = Display("Primary", 0, 0, 96, 64, True)
         with (tempfile.TemporaryDirectory() as directory,
               patch("katman.windows_capture.displays", return_value=[monitor]),
+              patch("katman.windows_capture.dxgi_targets", return_value={"primary": (0, 0)}),
               patch("katman.windows_capture.desktop_duplication_command",
                     return_value=[sys.executable, "-c", "raise SystemExit(1)"]),
               patch("katman.windows_capture.capture_command",
