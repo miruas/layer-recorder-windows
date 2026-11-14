@@ -55,6 +55,8 @@ jobs:
       - name: Build and test the original GSR overlay
         run: |
           ./tools/test-gsr-windows-widgets.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay
+      - name: Verify overlay settings survive closing
+        run: ./tools/test-gsr-windows-overlay.ps1 -OverlayDirectory build/native/windows-overlay-package/overlay -CloseSettings
       - name: Package the Windows build
         if: github.event_name == 'push'
         run: |
