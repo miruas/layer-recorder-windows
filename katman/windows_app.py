@@ -15,7 +15,7 @@ import time
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
-    replay_durations, video_cursor, video_rate_control, video_resolution, window_source,
+    ac_power_connected, replay_durations, video_cursor, video_rate_control, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -129,6 +129,9 @@ def capture_controls(library, *, background=False):
     overlay_window = None
     hotkeys = None
     next_inventory = 0.0
+    next_power_check = 0.0
+    last_startup_power = None
+    startup_replay = False
     next_audio_inventory = 0.0
     active_display_count = None
     busy = False
@@ -638,6 +641,7 @@ def capture_controls(library, *, background=False):
 
     def poll():
         nonlocal capture, stream, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
+        nonlocal next_power_check, startup_replay
         if instance.show_requested():
             show()
         try:
@@ -675,6 +679,7 @@ def capture_controls(library, *, background=False):
                 status.set("Recording · Replay is also active" if mode == "record" else "Replay active")
             if action == "stop":
                 capture, mode = None, None
+                startup_replay = False
                 replay_status.set("")
             if action == "audio_inventory":
                 if error:
@@ -739,6 +744,9 @@ def capture_controls(library, *, background=False):
                 pass
 
         now = time.monotonic()
+        if not busy and not closing and now >= next_power_check:
+            next_power_check = now + 2
+            check_replay_startup()
         if capture is not None and not capture.paused and not busy and now >= next_inventory:
             next_inventory = now + 1
             inspect_audio = (capture.audio or capture.follow_application_audio) and now >= next_audio_inventory
@@ -756,17 +764,29 @@ def capture_controls(library, *, background=False):
     apply_hotkeys()
     update_buttons()
     root.after(150, poll)
-    def initialize_capture():
-        if busy or closing or capture is not None:
-            return
+    def check_replay_startup():
+        nonlocal last_startup_power, startup_replay
         settings = gsr_settings("replay")
-        if settings.get("turn_on_replay_automatically_mode") == "turn_on_at_system_startup":
+        if settings.get("turn_on_replay_automatically_mode") != "turn_on_at_system_startup":
+            last_startup_power = None
+            return
+        plugged_only = settings.get("only_start_replay_if_power_supply_connected") is True
+        allowed = not plugged_only or ac_power_connected()
+        previous, last_startup_power = last_startup_power, allowed
+        if startup_replay and capture is not None and not allowed:
+            stop()
+        elif allowed and previous is not True and capture is None:
             options = settings.get("record_options")
             target = options.get("record_area_option") if isinstance(options, dict) else None
             if target not in ("window", "region"):
                 start("replay", use_gsr=True)
+                startup_replay = busy
                 return
             status.set("Select a monitor in GSR to start replay automatically.")
+
+    def initialize_capture():
+        if busy or closing or capture is not None:
+            return
         refresh_audio()
 
     root.after(200, initialize_capture)

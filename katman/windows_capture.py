@@ -39,6 +39,18 @@ def replay_durations(settings, default_seconds=300):
     return seconds, short, max(short, duration("long_save_duration", 300))
 
 
+def ac_power_connected():
+    class PowerStatus(ctypes.Structure):
+        _fields_ = [("ac", wintypes.BYTE), ("battery", wintypes.BYTE),
+                    ("percentage", wintypes.BYTE), ("saver", wintypes.BYTE),
+                    ("remaining", wintypes.DWORD), ("full", wintypes.DWORD)]
+
+    status = PowerStatus()
+    query = ctypes.WinDLL("kernel32").GetSystemPowerStatus
+    query.argtypes = [ctypes.POINTER(PowerStatus)]
+    return bool(query(ctypes.byref(status)) and status.ac == 1)
+
+
 
 @dataclass(frozen=True)
 class Display:
