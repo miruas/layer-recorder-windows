@@ -33,6 +33,11 @@ def default_library():
     return Path.home() / "Videos" / "Layer"
 
 
+def gsr_save_directory(settings, library):
+    directory = settings.get("save_directory")
+    return Path(directory).expanduser().resolve() if isinstance(directory, str) and directory.strip() else library
+
+
 def export(path, output):
     from .export import export_project
     return export_project(path, output)
@@ -52,6 +57,10 @@ def editor_command(project=None, library=None):
         command.extend(("--project", str(Path(project).expanduser().resolve())))
     if library is not None:
         command.extend(("--library", str(library)))
+        directories = dict.fromkeys(gsr_save_directory(gsr_settings(kind), library) for kind in ("record", "replay"))
+        directories.pop(library, None)
+        for directory in directories:
+            command.extend(("--recording-directory", str(directory)))
     return command
 
 
@@ -288,10 +297,13 @@ def capture_controls(library, *, background=False):
         color_range = None
         rate_control = None
         container = "mp4"
+        recording_directory = replay_directory = library
         configured_tracks = None
         chosen_monitor = False
         if use_gsr:
             settings = gsr_settings(kind)
+            recording_directory = gsr_save_directory(settings, library)
+            replay_directory = gsr_save_directory(gsr_settings("replay"), library)
             record_options = settings.get("record_options")
             cursor = video_cursor(record_options)
             color_range = video_color_range(record_options)
@@ -362,11 +374,11 @@ def capture_controls(library, *, background=False):
                 if type(duration) is int and 1 <= duration <= seconds:
                     replay_save_lengths[action] = duration
         status.set("Starting capture…")
-        submit(kind, lambda: Capture(library, selected, rate, codec, seconds=seconds, record=kind == "record",
+        submit(kind, lambda: Capture(recording_directory, selected, rate, codec, seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
                                      follow_application_audio=follow_audio, fixed_region=region,
                                      resolution=resolution, cursor=cursor, color_range=color_range,
-                                     rate_control=rate_control, container=container))
+                                     rate_control=rate_control, container=container, replay_directory=replay_directory))
 
     def stop():
         status.set("Finishing capture…")

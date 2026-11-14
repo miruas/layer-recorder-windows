@@ -363,7 +363,7 @@ class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
-                 color_range=None, rate_control=None, container="mp4"):
+                 color_range=None, rate_control=None, container="mp4", replay_directory=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -371,6 +371,7 @@ class Capture:
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             raise RuntimeError("Install FFmpeg and add both ffmpeg and ffprobe to PATH.")
         self.library = Path(library).expanduser().resolve()
+        self.replay_directory = Path(replay_directory).expanduser().resolve() if replay_directory else self.library
         self.library.mkdir(parents=True, exist_ok=True)
         self.record_folder = None
         self.fps = fps
@@ -620,7 +621,8 @@ class Capture:
         live_video = [end for end, track in bounds if not track.stopped and track.kind == "video"]
         end = min(live_video) if live_video else max(end for end, _ in bounds)
         cutoff = max(min(row["started"] + row["first"] for _, row in snapshots), end - seconds)
-        folder = Path(tempfile.mkdtemp(prefix="Layer-replay-", dir=self.library))
+        self.replay_directory.mkdir(parents=True, exist_ok=True)
+        folder = Path(tempfile.mkdtemp(prefix="Layer-replay-", dir=self.replay_directory))
         try:
             (folder / "media").mkdir()
             tracks = []

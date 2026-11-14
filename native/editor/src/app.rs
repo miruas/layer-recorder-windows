@@ -394,6 +394,11 @@ impl Studio {
     }
     fn scan(&self) {
         let root = ipc::expand(self.cfg["library"].as_str().unwrap_or("~/Videos/Layer"));
+        let mut roots = vec![root];
+        let args: Vec<_> = std::env::args_os().collect();
+        roots.extend(args.windows(2).filter_map(|pair| {
+            (pair[0] == "--recording-directory").then(|| PathBuf::from(&pair[1]))
+        }));
         let tx = self.tx.clone();
         thread::spawn(move || {
             let mut rows = vec![];
@@ -438,7 +443,14 @@ impl Studio {
                     }
                 }
             }
-            walk(&root, 0, &mut rows);
+            let mut seen = HashSet::new();
+            for root in roots {
+                if seen.insert(fs::canonicalize(&root).unwrap_or(root.clone())) {
+                    walk(&root, 0, &mut rows);
+                }
+            }
+            seen.clear();
+            rows.retain(|row| seen.insert(fs::canonicalize(&row.path).unwrap_or_else(|_| row.path.clone())));
             rows.sort_by(|a, b| b.created.cmp(&a.created));
             let _ = tx.send(Message::Library(rows));
         });
