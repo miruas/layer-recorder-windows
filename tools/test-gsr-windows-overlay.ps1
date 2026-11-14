@@ -2,7 +2,8 @@ param(
     [string]$Toolchain = 'C:/msys64/ucrt64/bin',
     [string]$OverlayDirectory = '',
     [switch]$SelectRecordings,
-    [switch]$SelectRegion
+    [switch]$SelectRegion,
+    [switch]$CloseSettings
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -61,6 +62,12 @@ $launch.ArgumentList.Add($source)
 if ($SelectRegion) { $launch.ArgumentList.Add('region') }
 $launch.UseShellExecute = $false
 $launch.RedirectStandardOutput = $true
+$configDirectory = $null
+if ($CloseSettings) {
+    $configDirectory = [IO.Directory]::CreateTempSubdirectory('layer-overlay-')
+    $configFile = Join-Path $configDirectory.FullName 'config_ui'
+    $launch.Environment['LAYER_GSR_CONFIG'] = $configFile
+}
 $process = [System.Diagnostics.Process]::Start($launch)
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -77,7 +84,19 @@ try {
         $bounds.Right -ne $info.Bounds.Right -or $bounds.Bottom -ne $info.Bounds.Bottom) {
         throw 'The overlay did not cover the cursor monitor.'
     }
-    if ($SelectRegion) {
+    if ($CloseSettings) {
+        $height = $bounds.Bottom - $bounds.Top
+        $card = [int][Math]::Floor($height / 5)
+        $side = [int][Math]::Floor($card * .33)
+        $x = [int](($bounds.Right - $bounds.Left) / 2 + 2 * $card + .83 * $side)
+        $y = [int]($height / 4 + $card / 2 - $side / 2)
+        $point = [IntPtr](($y -shl 16) -bor $x)
+        if (![GsrOverlayTest]::PostMessage($window, 0x201, [IntPtr]1, $point) -or
+            ![GsrOverlayTest]::PostMessage($window, 0x202, [IntPtr]0, $point) -or
+            ![GsrOverlayTest]::PostMessage($window, 0x10, [IntPtr]0, [IntPtr]0)) {
+            throw 'Could not open and close the GSR settings.'
+        }
+    } elseif ($SelectRegion) {
         $start = [IntPtr]((250 -shl 16) -bor 300)
         $end = [IntPtr]((70 -shl 16) -bor 100)
         if (![GsrOverlayTest]::PostMessage($window, 0x201, [IntPtr]1, $start) -or
@@ -103,7 +122,11 @@ try {
     }
     if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'The overlay did not close cleanly.' }
     $action = $process.StandardOutput.ReadToEnd().Trim()
-    if ($SelectRegion) {
+    if ($CloseSettings) {
+        $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+        if (!$config.main -or $action -ne 'resume_hotkeys') { throw 'Closing settings did not save the GSR configuration.' }
+        Write-Host 'The overlay saved its settings before closing.'
+    } elseif ($SelectRegion) {
         $expected = "region $($bounds.Left + 100) $($bounds.Top + 70) 200 180"
         if ($action -ne $expected) { throw "Expected '$expected', received '$action'." }
         Write-Host 'The native overlay returned the selected desktop region.'
@@ -117,4 +140,8 @@ try {
 } finally {
     if (!$process.HasExited) { $process.Kill() }
     $process.Dispose()
+    if ($configDirectory) {
+        if (Test-Path -LiteralPath $configFile) { Remove-Item -LiteralPath $configFile }
+        $configDirectory.Delete()
+    }
 }
