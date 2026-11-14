@@ -18,6 +18,15 @@ from katman.windows_audio import AudioSource, audio_encoder_command
 
 
 class ReplayTests(unittest.TestCase):
+    def test_desktop_duplication_crop_uses_monitor_relative_offsets(self):
+        monitor = Display("Monitor", -1920, -120, 1920, 1080, True)
+        region = Display("Selected region", -1856, -80, 640, 360)
+        command = desktop_duplication_command(region, 60, monitor)
+        self.assertIn(
+            "ddagrab=output_idx=0:framerate=60:output_fmt=bgra:video_size=640x360:offset_x=64:offset_y=40",
+            command,
+        )
+
     def test_gsr_frame_rate_mode_reaches_both_capture_backends(self):
         display = Display("Primary", 0, 0, 1920, 1080, True)
         for command in (capture_command(display, 60, "libx264"), desktop_duplication_command(display, 60)):

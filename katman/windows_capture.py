@@ -202,13 +202,15 @@ def capture_command(display, fps, encoder):
             "empty_moov+default_base_moof+frag_keyframe+skip_trailer", "-f", "mp4", "pipe:1"]
 
 
-def desktop_duplication_command(display, fps):
+def desktop_duplication_command(display, fps, monitor=None):
     command = capture_command(display, fps, "h264_nvenc")
     # Pass D3D11 surfaces directly to NVENC. CFR normalizes DXGI timestamps
     # to one frame per output tick before the fragmented MP4 muxer.
-    command[4:command.index("-an")] = [
-        "-f", "lavfi", "-i", f"ddagrab=output_idx=0:framerate={fps}:output_fmt=bgra",
-    ]
+    source = f"ddagrab=output_idx=0:framerate={fps}:output_fmt=bgra"
+    if monitor is not None and display != monitor:
+        source += (f":video_size={display.width}x{display.height}"
+                   f":offset_x={display.x - monitor.x}:offset_y={display.y - monitor.y}")
+    command[4:command.index("-an")] = ["-f", "lavfi", "-i", source]
     # Leave headroom in the default 512 MiB ring for five minutes of video,
     # independent AAC tracks and container overhead.
     rate = command.index("-b:v")
@@ -514,8 +516,13 @@ class Capture:
         self.single_display = current[0] if len(current) == 1 and current[0].primary else None
 
     def _backend(self, source):
+        monitor = self.single_display
+        region_on_monitor = (monitor is not None and source == self.fixed_region and
+                             monitor.x <= source.x and monitor.y <= source.y and
+                             source.x + source.width <= monitor.x + monitor.width and
+                             source.y + source.height <= monitor.y + monitor.height)
         if (self.resolution is None and self.color_range != "pc" and self.framerate_mode != "content" and
-                self.encoder == "h264_nvenc" and source == self.single_display and
+                self.encoder == "h264_nvenc" and (source == monitor or region_on_monitor) and
                 source.key not in self.duplication_failed and source.width % 2 == source.height % 2 == 0):
             return "ddagrab"
         return "gdigrab"
@@ -524,7 +531,7 @@ class Capture:
         self.serial += 1
         if isinstance(source, Display):
             backend = self._backend(source)
-            command = (desktop_duplication_command(source, self.fps) if backend == "ddagrab"
+            command = (desktop_duplication_command(source, self.fps, self.single_display) if backend == "ddagrab"
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             set_capture_cursor(command, self.cursor)
             set_video_rate_control(command, self.rate_control)
