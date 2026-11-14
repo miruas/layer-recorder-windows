@@ -23,7 +23,7 @@ class WindowsFrontPage {
 public:
     WindowsFrontPage(Config &config, GsrInfo &info, std::function<void(FrontPageAction)> action);
     void resize(mgl::vec2i size);
-    void set_capture_state(bool recording, bool replay, bool paused = false);
+    void set_capture_state(bool recording, bool replay, bool paused = false, bool streaming = false);
     bool on_event(mgl::Event &event, mgl::Window &window);
     bool back();
     void draw(mgl::Window &window);

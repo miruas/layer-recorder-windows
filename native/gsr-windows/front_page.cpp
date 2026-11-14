@@ -32,8 +32,12 @@ bool WindowsFrontPage::back() {
     return !page_stack.empty();
 }
 
-void WindowsFrontPage::set_capture_state(bool recording, bool replay, bool paused) {
+void WindowsFrontPage::set_capture_state(bool recording, bool replay, bool paused, bool streaming) {
     auto &theme = get_theme();
+    stream_dropdown_button_ptr->set_description(streaming ? TR("Streaming") : TR("Not streaming"));
+    stream_dropdown_button_ptr->set_activated(streaming);
+    stream_dropdown_button_ptr->set_item_label("start", streaming ? TR("Stop") : TR("Start"));
+    stream_dropdown_button_ptr->set_item_icon("start", streaming ? &theme.stop_texture : &theme.play_texture);
     record_dropdown_button_ptr->set_description(paused ? TR("Paused") : recording ? TR("Recording") : TR("Not recording"));
     record_dropdown_button_ptr->set_item_enabled("pause", recording);
     record_dropdown_button_ptr->set_item_label("pause", paused ? TR("Unpause") : TR("Pause"));

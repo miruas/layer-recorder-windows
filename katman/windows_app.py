@@ -108,6 +108,7 @@ def capture_controls(library, *, background=False):
     audio_options = []
     last_audio_inventory = None
     capture = None
+    stream = None
     replay_save_lengths = {}
     mode = None
     overlay = None
@@ -355,6 +356,34 @@ def capture_controls(library, *, background=False):
         status.set("Saving replay…")
         submit("save", lambda: capture.save_replay(seconds))
 
+    def toggle_stream(*, from_overlay=False):
+        if stream is not None:
+            submit("stream_stop", stream.stop)
+            return
+        from .windows_stream import stream_destination, stream_frame_rate
+
+        try:
+            settings = gsr_settings("streaming")
+            destination = stream_destination(settings)
+            options = settings.get("record_options") or {}
+            target = options.get("record_area_option", "focused_monitor")
+            if target == "region":
+                launch_overlay("region", region_capture="stream")
+                return
+            source = (window_source(overlay_window if from_overlay else foreground_window())
+                      if target == "window" else capture_monitor(target))
+            launch_stream(source, stream_frame_rate(settings), destination)
+        except (OSError, RuntimeError, ValueError, AttributeError) as error:
+            status.set(str(error))
+            show()
+
+    def launch_stream(source, rate, destination):
+        from .windows_stream import Livestream
+
+        codec = encoder.get()
+        status.set("Starting livestream…")
+        submit("stream_start", lambda: Livestream(source, rate, codec, destination))
+
     def stop_overlay():
         nonlocal overlay_dismissed
         if overlay is not None and overlay.poll() is None:
@@ -368,7 +397,8 @@ def capture_controls(library, *, background=False):
         if overlay is not None:
             stop_overlay()
         else:
-            launch_overlay("paused" if capture and capture.paused else mode or "idle")
+            state = "paused" if capture and capture.paused else mode or "idle"
+            launch_overlay(state + ("+stream" if stream is not None else ""))
 
     def launch_overlay(overlay_mode, *, region_capture=None):
         nonlocal overlay, overlay_dismissed, overlay_region_capture, overlay_window
@@ -420,6 +450,16 @@ def capture_controls(library, *, background=False):
                     return
                 if overlay_region_capture:
                     region = Display("Selected region", x, y, width, height)
+                    if overlay_region_capture == "stream":
+                        from .windows_stream import stream_destination, stream_frame_rate
+
+                        try:
+                            settings = gsr_settings("streaming")
+                            launch_stream(region, stream_frame_rate(settings), stream_destination(settings))
+                        except (ValueError, AttributeError) as error:
+                            status.set(str(error))
+                            show()
+                        return
                     start(overlay_region_capture, from_overlay=True, region=region)
                     return
                 source = desktop_source(x, y, width, height)
@@ -428,10 +468,14 @@ def capture_controls(library, *, background=False):
                 submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
         elif not busy and action in {b"toggle_record", b"toggle_replay", b"toggle_pause", b"save_replay", b"save_short", b"save_long"}:
             handle_hotkey(action.decode("ascii"), from_overlay=True)
+        elif not busy and action == b"toggle_stream":
+            toggle_stream(from_overlay=True)
 
     def handle_hotkey(action, *, from_overlay=False):
         if action == "toggle_overlay":
             toggle_overlay()
+        elif action == "toggle_stream":
+            toggle_stream()
         elif action == "toggle_pause":
             if capture is not None and mode == "record":
                 submit("pause", capture.toggle_pause)
@@ -536,13 +580,15 @@ def capture_controls(library, *, background=False):
         nonlocal closing
         closing = True
         if not busy:
-            if capture is None:
+            if stream is not None:
+                submit("stream_stop", stream.stop)
+            elif capture is None:
                 root.destroy()
             else:
                 stop()
 
     def poll():
-        nonlocal capture, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
+        nonlocal capture, stream, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
         if instance.show_requested():
             show()
         try:
@@ -566,6 +612,13 @@ def capture_controls(library, *, background=False):
             pass
         else:
             busy = False
+            if action == "stream_start" and error is None:
+                stream = value
+                status.set("Livestream running.")
+            elif action == "stream_stop":
+                stream = None
+                if error is None:
+                    status.set("Livestream stopped.")
             if action in {"record", "replay"} and error is None:
                 capture, mode = value, action
                 next_inventory = next_audio_inventory = 0.0
@@ -621,6 +674,11 @@ def capture_controls(library, *, background=False):
 
         if not closing:
             poll_overlay()
+        if stream is not None and not busy and stream.poll() is not None:
+            stream.stop()
+            stream = None
+            status.set("Livestream ended. Check the destination and stream key.")
+            show()
 
         if hotkeys and not closing:
             try:

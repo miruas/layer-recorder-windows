@@ -19,6 +19,7 @@ ADDITIONAL_HOTKEYS = {
     0x22C: (0x0002, "screenshot_region", "Ctrl+Print Screen"),
     0x178: (0x0004, "toggle_window_record", "Shift+F9"),
     0x176: (0x0001, "toggle_pause", "Alt+F7"),
+    0x177: (0x0001, "toggle_stream", "Alt+F8"),
 }
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012

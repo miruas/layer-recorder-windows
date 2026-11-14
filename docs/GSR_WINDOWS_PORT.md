@@ -80,6 +80,9 @@ Shift+F9 starts or stops recording the foreground window directly.
 The original settings list Windows audio endpoints and active applications
 from WASAPI. Record and Replay use the selected sources as independent Layer
 tracks. Inverted application audio, mixing multiple sources into one GSR
-track, other capture options and livestream still need integration.
+track and other capture options still need integration.
 Alt+F7 and the Record menu pause and resume recording. Resume starts new
 media segments, and the recording timeline excludes the paused interval.
+The Livestream card and Alt+F8 start or stop video publishing over RTMP or
+RTMPS. Publishing uses the configured monitor, window or selected region.
+Live audio, WHIP and custom non-FLV containers still need integration.

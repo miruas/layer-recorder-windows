@@ -149,6 +149,7 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
             case Action::replay_save_long: name = "save_long"; break;
             case Action::record_toggle: name = "toggle_record"; break;
             case Action::record_pause: name = "toggle_pause"; break;
+            case Action::stream_toggle: name = "toggle_stream"; break;
             case Action::recordings: name = "recordings"; break;
             case Action::settings: name = "settings"; break;
             default: break;
@@ -160,8 +161,11 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
             }
         });
         page.resize(window.get_size());
-        const bool recording = mode == L"record" || mode == L"paused";
-        page.set_capture_state(recording, recording || mode == L"replay", mode == L"paused");
+        const auto separator = mode.find(L'+');
+        const auto capture = mode.substr(0, separator);
+        const bool streaming = separator != mode.npos && mode.substr(separator + 1) == L"stream";
+        const bool recording = capture == L"record" || capture == L"paused";
+        page.set_capture_state(recording, recording || capture == L"replay", capture == L"paused", streaming);
         mgl::Sprite desktop(&backdrop);
         auto draw = [&] {
             window.clear();
