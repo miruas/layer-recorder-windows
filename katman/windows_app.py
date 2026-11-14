@@ -17,7 +17,7 @@ from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
     ac_power_connected, replay_durations, running_steam_game, video_cursor, video_rate_control, video_resolution, window_source,
 )
-from .windows_hotkeys import GlobalHotkeys
+from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
@@ -243,8 +243,14 @@ def capture_controls(library, *, background=False):
     def apply_hotkeys():
         nonlocal hotkeys
         if hotkey_setting.get():
+            bindings, unsupported = hotkey_bindings(gsr_settings)
+            if hotkeys:
+                if (hotkeys.bindings, hotkeys.unsupported) == (bindings, unsupported):
+                    return
+                hotkeys.close()
+                hotkeys = None
             try:
-                hotkeys = GlobalHotkeys()
+                hotkeys = GlobalHotkeys(gsr_settings)
                 if hotkeys.conflicts:
                     status.set("Unavailable shortcuts: " + ", ".join(hotkeys.conflicts))
             except OSError as error:
@@ -471,6 +477,7 @@ def capture_controls(library, *, background=False):
             return
         finished, overlay = overlay, None
         action = finished.communicate()[0].strip()
+        apply_hotkeys()
         if overlay_dismissed:
             return
         if finished.returncode:

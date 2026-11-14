@@ -30,13 +30,73 @@ ADDITIONAL_HOTKEYS = {
 }
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
-MODIFIERS = 0x0001 | 0x0002 | 0x4000
+GSR_BINDINGS = {
+    OVERLAY_KEY: ("main", "show_hide_hotkey"),
+    0x15A: ("main", "layer_editor_hotkey"),
+    0x176: ("record", "pause_unpause_hotkey"),
+    0x177: ("streaming", "start_stop_hotkey"),
+    0x278: ("record", "start_stop_hotkey"),
+    0x378: ("record", "start_stop_region_hotkey"),
+    0x178: ("record", "start_stop_window_hotkey"),
+    0x179: ("replay", "start_stop_hotkey"),
+    0x279: ("replay", "save_hotkey"),
+    0x17A: ("replay", "save_1_min_hotkey"),
+    0x17B: ("replay", "save_10_min_hotkey"),
+    0x2C: ("screenshot", "take_screenshot_hotkey"),
+    0x12C: ("screenshot", "take_screenshot_window_hotkey"),
+    0x22C: ("screenshot", "take_screenshot_region_hotkey"),
+}
+
+
+def gsr_key(key):
+    # Serialized values in the pinned MGL key enum.
+    for start, end, vk, name in ((1, 26, 0x41, "letter"), (27, 36, 0x30, "digit"),
+                                 (86, 100, 0x70, "function"), (116, 124, 0x7F, "function")):
+        if start <= key <= end:
+            code = vk + key - start
+            return code, f"F{code - 0x6F}" if name == "function" else chr(code)
+    return {37: (0x1B, "Esc"), 58: (0x20, "Space"), 59: (0x0D, "Enter"),
+            61: (0x09, "Tab"), 102: (0x2C, "Print Screen")}.get(key)
+
+
+def hotkey_bindings(settings=None):
+    result = {identifier: (identifier, 1 if identifier == OVERLAY_KEY else 3, action, label)
+              for identifier, (action, label) in HOTKEYS.items()}
+    result.update({identifier: (identifier & 0xFF, mods, action, label)
+                   for identifier, (mods, action, label) in ADDITIONAL_HOTKEYS.items()})
+    if settings is None:
+        return result, []
+    unsupported = []
+    for identifier, (section, name) in GSR_BINDINGS.items():
+        config = settings(section).get(name)
+        if not isinstance(config, dict):
+            continue
+        key, mods = config.get("key"), config.get("modifiers")
+        _, _, action, label = result[identifier]
+        if key == 0:
+            del result[identifier]
+            continue
+        translated = gsr_key(key) if type(key) is int else None
+        if translated is None or type(mods) is not int or not 0 <= mods <= 255:
+            unsupported.append(label)
+            del result[identifier]
+            continue
+        vk, key_name = translated
+        flags, names = 0, []
+        for mask, flag, prefix in ((0xC0, 8, "Win"), (0x0C, 2, "Ctrl"),
+                                   (0x30, 1, "Alt"), (0x03, 4, "Shift")):
+            if mods & mask:
+                flags |= flag
+                names.append(prefix)
+        result[identifier] = vk, flags, action, "+".join([*names, key_name])
+    return result, unsupported
 
 
 class GlobalHotkeys:
-    def __init__(self):
+    def __init__(self, settings=None):
         self.events = queue.SimpleQueue()
         self.ready = queue.Queue(maxsize=1)
+        self.bindings, self.unsupported = hotkey_bindings(settings)
         self.user32 = ctypes.WinDLL("user32", use_last_error=True)
         self.user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int,
                                                wintypes.UINT, wintypes.UINT]
@@ -55,17 +115,11 @@ class GlobalHotkeys:
         message = wintypes.MSG()
         self.user32.PeekMessageW(ctypes.byref(message), None, 0, 0, 0)
         registered = []
-        conflicts = []
-        actions = {key: action for key, (action, _) in HOTKEYS.items()}
+        conflicts = list(self.unsupported)
+        actions = {}
         try:
-            for key, (_, label) in HOTKEYS.items():
-                modifiers = MODIFIERS & ~0x0002 if key == OVERLAY_KEY else MODIFIERS
-                if self.user32.RegisterHotKey(None, key, modifiers, key):
-                    registered.append(key)
-                else:
-                    conflicts.append(label)
-            for identifier, (modifiers, action, label) in ADDITIONAL_HOTKEYS.items():
-                if self.user32.RegisterHotKey(None, identifier, modifiers | 0x4000, identifier & 0xFF):
+            for identifier, (vk, modifiers, action, label) in self.bindings.items():
+                if self.user32.RegisterHotKey(None, identifier, modifiers | 0x4000, vk):
                     registered.append(identifier)
                     actions[identifier] = action
                 else:
