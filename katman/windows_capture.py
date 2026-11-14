@@ -27,6 +27,18 @@ def recording_container(settings):
     return container
 
 
+def replay_durations(settings, default_seconds=300):
+    seconds = settings.get("time", default_seconds)
+    seconds = max(1, min(seconds, 86400)) if type(seconds) is int else default_seconds
+
+    def duration(key, default):
+        value = settings.get(key)
+        return min(value if type(value) is int and value >= 1 else default, seconds)
+
+    short = duration("short_save_duration", 60)
+    return seconds, short, max(short, duration("long_save_duration", 300))
+
+
 
 @dataclass(frozen=True)
 class Display:
@@ -363,7 +375,8 @@ class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
-                 color_range=None, rate_control=None, container="mp4", replay_directory=None):
+                 color_range=None, rate_control=None, container="mp4", replay_directory=None,
+                 replay_container=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -379,6 +392,8 @@ class Capture:
         self.seconds = seconds
         self.memory_bytes = memory_mb * 1024**2
         self.container = recording_container({"container": container})
+        self.replay_container = self.container if replay_container is None else recording_container(
+            {"container": replay_container})
         self.engine = CaptureEngine(seconds, self.memory_bytes)
         self.selected = {display.key for display in selected}
         self.audio = {source.key: source for source in audio}
@@ -641,7 +656,8 @@ class Capture:
             raise
 
     def _write_project(self, path, kind, tracks, cutoff=None, end=None):
-        extension = RECORDING_CONTAINERS[self.container]
+        container = self.replay_container if kind == "replay" else self.container
+        extension = RECORDING_CONTAINERS[container]
         converted = []
         cleanup = []
         warnings = list(self.warnings)
@@ -653,7 +669,7 @@ class Capture:
             pending = media.with_suffix(".pending" + extension)
             try:
                 subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(media),
-                                "-map", "0", "-c", "copy", "-f", self.container, str(pending)],
+                                "-map", "0", "-c", "copy", "-f", container, str(pending)],
                                check=True, capture_output=True, timeout=120,
                                creationflags=subprocess.CREATE_NO_WINDOW)
                 pending.replace(output)

@@ -15,7 +15,7 @@ import time
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
-    video_cursor, video_rate_control, video_resolution, window_source,
+    replay_durations, video_cursor, video_rate_control, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -297,13 +297,16 @@ def capture_controls(library, *, background=False):
         color_range = None
         rate_control = None
         container = "mp4"
+        replay_container = None
+        save_lengths = {}
         recording_directory = replay_directory = library
         configured_tracks = None
         chosen_monitor = False
         if use_gsr:
             settings = gsr_settings(kind)
+            replay_settings = settings if kind == "replay" else gsr_settings("replay")
             recording_directory = gsr_save_directory(settings, library)
-            replay_directory = gsr_save_directory(gsr_settings("replay"), library)
+            replay_directory = gsr_save_directory(replay_settings, library)
             record_options = settings.get("record_options")
             cursor = video_cursor(record_options)
             color_range = video_color_range(record_options)
@@ -311,6 +314,7 @@ def capture_controls(library, *, background=False):
                 resolution = video_resolution(record_options)
                 rate_control = video_rate_control(record_options)
                 container = recording_container(settings)
+                replay_container = recording_container(replay_settings)
             except ValueError as error:
                 status.set(str(error))
                 show()
@@ -333,10 +337,8 @@ def capture_controls(library, *, background=False):
             configured_rate = record_options.get("fps") if isinstance(record_options, dict) else None
             if type(configured_rate) is int and 1 <= configured_rate <= 500:
                 rate = configured_rate
-            if kind == "replay":
-                configured_seconds = settings.get("time")
-                if type(configured_seconds) is int and 1 <= configured_seconds <= 86400:
-                    seconds = configured_seconds
+            seconds, short, long = replay_durations(replay_settings)
+            save_lengths = {"save_short": short, "save_long": long}
         if force_window or (use_gsr and isinstance(record_options, dict)
                             and record_options.get("record_area_option") == "window"):
             try:
@@ -367,18 +369,14 @@ def capture_controls(library, *, background=False):
         if region is not None:
             selected = [region]
         follow_screens = follow_displays.get() and not chosen_monitor and region is None
-        replay_save_lengths = {}
-        if use_gsr and kind == "replay":
-            for action, key in (("save_short", "short_save_duration"), ("save_long", "long_save_duration")):
-                duration = settings.get(key)
-                if type(duration) is int and 1 <= duration <= seconds:
-                    replay_save_lengths[action] = duration
+        replay_save_lengths = save_lengths
         status.set("Starting capture…")
         submit(kind, lambda: Capture(recording_directory, selected, rate, codec, seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
                                      follow_application_audio=follow_audio, fixed_region=region,
                                      resolution=resolution, cursor=cursor, color_range=color_range,
-                                     rate_control=rate_control, container=container, replay_directory=replay_directory))
+                                     rate_control=rate_control, container=container, replay_directory=replay_directory,
+                                     replay_container=replay_container))
 
     def stop():
         status.set("Finishing capture…")
