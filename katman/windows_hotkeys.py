@@ -13,10 +13,11 @@ HOTKEYS = {
     0x79: ("save_short", "Ctrl+Alt+F10"),
     0x7A: ("save_long", "Ctrl+Alt+F11"),
 }
-SCREENSHOT_HOTKEYS = {
+ADDITIONAL_HOTKEYS = {
     0x2C: (0, "screenshot", "Print Screen"),
     0x12C: (0x0004, "screenshot_window", "Shift+Print Screen"),
     0x22C: (0x0002, "screenshot_region", "Ctrl+Print Screen"),
+    0x178: (0x0004, "toggle_window_record", "Shift+F9"),
 }
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012
@@ -54,8 +55,8 @@ class GlobalHotkeys:
                     registered.append(key)
                 else:
                     conflicts.append(label)
-            for identifier, (modifiers, action, label) in SCREENSHOT_HOTKEYS.items():
-                if self.user32.RegisterHotKey(None, identifier, modifiers | 0x4000, 0x2C):
+            for identifier, (modifiers, action, label) in ADDITIONAL_HOTKEYS.items():
+                if self.user32.RegisterHotKey(None, identifier, modifiers | 0x4000, identifier & 0xFF):
                     registered.append(identifier)
                     actions[identifier] = action
                 else:

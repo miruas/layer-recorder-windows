@@ -142,9 +142,9 @@ class ProjectTests(unittest.TestCase):
 @unittest.skipUnless(os.name == "nt", "Win32 hotkeys")
 class HotkeyTests(unittest.TestCase):
     def test_message_routing_and_registration_conflicts(self):
-        from katman.windows_hotkeys import GlobalHotkeys, HOTKEYS, SCREENSHOT_HOTKEYS, WM_HOTKEY
+        from katman.windows_hotkeys import ADDITIONAL_HOTKEYS, GlobalHotkeys, HOTKEYS, WM_HOTKEY
         actions = {key: action for key, (action, _) in HOTKEYS.items()}
-        actions.update({key: action for key, (_, action, _) in SCREENSHOT_HOTKEYS.items()})
+        actions.update({key: action for key, (_, action, _) in ADDITIONAL_HOTKEYS.items()})
         first = GlobalHotkeys()
         try:
             if first.conflicts:

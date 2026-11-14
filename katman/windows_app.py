@@ -13,7 +13,7 @@ import threading
 import time
 
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
-from .windows_capture import Capture, Display, capture_binary, displays
+from .windows_capture import Capture, Display, capture_binary, displays, foreground_window, window_source
 from .windows_hotkeys import GlobalHotkeys
 from .windows_screenshot import capture_monitor, gsr_settings
 
@@ -113,6 +113,7 @@ def capture_controls(library, *, background=False):
     overlay = None
     overlay_dismissed = False
     overlay_region_capture = None
+    overlay_window = None
     hotkeys = None
     next_inventory = 0.0
     next_audio_inventory = 0.0
@@ -273,7 +274,7 @@ def capture_controls(library, *, background=False):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def start(kind, *, from_overlay=False, region=None):
+    def start(kind, *, from_overlay=False, region=None, force_window=False):
         nonlocal replay_save_lengths
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
@@ -305,6 +306,15 @@ def capture_controls(library, *, background=False):
                 configured_seconds = settings.get("time")
                 if type(configured_seconds) is int and 1 <= configured_seconds <= 86400:
                     seconds = configured_seconds
+        if force_window or (from_overlay and isinstance(record_options, dict)
+                            and record_options.get("record_area_option") == "window"):
+            try:
+                selected = [window_source(overlay_window if from_overlay else foreground_window())]
+                chosen_monitor = True
+            except RuntimeError as error:
+                status.set(str(error))
+                show()
+                return
         sources = [audio_options[index] for index in audio_select.curselection()]
         follow_audio = follow_apps.get() if configured_tracks is None else False
         if configured_tracks is not None:
@@ -361,12 +371,13 @@ def capture_controls(library, *, background=False):
             launch_overlay(mode or "idle")
 
     def launch_overlay(overlay_mode, *, region_capture=None):
-        nonlocal overlay, overlay_dismissed, overlay_region_capture
+        nonlocal overlay, overlay_dismissed, overlay_region_capture, overlay_window
         executable = APP / "overlay/layer-gsr-overlay.exe"
         resources = APP / "overlay/resources"
         try:
             overlay_dismissed = False
             overlay_region_capture = region_capture
+            overlay_window = foreground_window()
             from .windows_audio import gsr_audio_inventory
 
             inventory = gsr_audio_inventory(last_audio_inventory or ())
@@ -443,9 +454,9 @@ def capture_controls(library, *, background=False):
                 submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                 status.set(str(error))
-        elif action == "toggle_record":
+        elif action in {"toggle_record", "toggle_window_record"}:
             if capture is None:
-                start("record", from_overlay=from_overlay)
+                start("record", from_overlay=from_overlay, force_window=action == "toggle_window_record")
             elif mode == "record":
                 stop()
             else:

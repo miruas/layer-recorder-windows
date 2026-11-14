@@ -29,6 +29,7 @@ class Display:
     height: int
     primary: bool = False
     device_id: str = ""
+    window: int = 0
 
     @property
     def key(self):
@@ -85,10 +86,39 @@ def displays():
     return sorted(result, key=lambda item: (not item.primary, item.name))
 
 
+def foreground_window():
+    user32 = ctypes.WinDLL("user32")
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    return user32.GetForegroundWindow()
+
+
+def window_source(handle):
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+    bounds = wintypes.RECT()
+    previous = user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
+    try:
+        if not handle or user32.IsIconic(handle) or not user32.GetClientRect(handle, ctypes.byref(bounds)):
+            raise RuntimeError("The selected window is unavailable or minimized.")
+    finally:
+        if previous:
+            user32.SetThreadDpiAwarenessContext(previous)
+    if min(bounds.right, bounds.bottom) < 2:
+        raise RuntimeError("The selected window has no visible client area.")
+    return Display("Selected window", 0, 0, bounds.right, bounds.bottom, window=handle)
+
+
 def capture_command(display, fps, encoder):
-    source = ["-f", "gdigrab", "-framerate", str(fps), "-offset_x", str(display.x),
+    source = ["-f", "gdigrab", "-framerate", str(fps)]
+    if display.window:
+        source.extend(["-draw_mouse", "0", "-i", f"hwnd={display.window}"])
+    else:
+        source.extend(["-offset_x", str(display.x),
               "-offset_y", str(display.y), "-video_size", f"{display.width}x{display.height}",
-              "-i", "desktop"]
+              "-i", "desktop"])
     quality = {
         "libx264": ["-preset", "ultrafast", "-tune", "zerolatency", "-crf", "21"],
         "h264_nvenc": ["-preset", "p3", "-rc", "vbr", "-cq", "21", "-b:v", "0"],
@@ -243,6 +273,7 @@ class Capture:
         self.audio = {source.key: source for source in audio}
         self.follow_displays = follow_displays
         self.fixed_region = fixed_region
+        self.fixed_windows = [source for source in selected if source.window]
         self.follow_application_audio = follow_application_audio
         self.tracks = []
         self.active = {}
@@ -330,6 +361,11 @@ class Capture:
                    region.x + region.width <= display.x + display.width and
                    region.y + region.height <= display.y + display.height for display in current):
                 desired[region.key] = region
+        for window in self.fixed_windows:
+            try:
+                desired[window.key] = window_source(window.window)
+            except RuntimeError:
+                continue
         if current_audio is None:
             desired.update(self.audio)
             desired.update((key, track.source) for key, track in self.active.items()

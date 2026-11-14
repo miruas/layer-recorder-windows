@@ -75,6 +75,8 @@ open their original GSR settings pages. Record and Replay launched from the
 overlay use the saved frame rate and monitor. Replay also uses its buffer and save lengths.
 When Region is selected, Record and Replay open the same drag selector and
 capture only the selected rectangle.
+Window capture targets the foreground window when the overlay opens.
+Shift+F9 starts or stops recording the foreground window directly.
 The original settings list Windows audio endpoints and active applications
 from WASAPI. Record and Replay use the selected sources as independent Layer
 tracks. Inverted application audio, mixing multiple sources into one GSR
