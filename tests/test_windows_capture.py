@@ -142,15 +142,17 @@ class ProjectTests(unittest.TestCase):
 @unittest.skipUnless(os.name == "nt", "Win32 hotkeys")
 class HotkeyTests(unittest.TestCase):
     def test_message_routing_and_registration_conflicts(self):
-        from katman.windows_hotkeys import GlobalHotkeys, HOTKEYS, WM_HOTKEY
+        from katman.windows_hotkeys import GlobalHotkeys, HOTKEYS, SCREENSHOT_HOTKEYS, WM_HOTKEY
+        actions = {key: action for key, (action, _) in HOTKEYS.items()}
+        actions.update({key: action for key, (_, action, _) in SCREENSHOT_HOTKEYS.items()})
         first = GlobalHotkeys()
         try:
             if first.conflicts:
                 self.skipTest("Another desktop process has one of Layer's hotkeys.")
             second = GlobalHotkeys()
             try:
-                self.assertEqual(len(second.conflicts), len(HOTKEYS))
-                for key, (action, _) in HOTKEYS.items():
+                self.assertEqual(len(second.conflicts), len(actions))
+                for key, action in actions.items():
                     self.assertTrue(first.user32.PostThreadMessageW(first.thread_id, WM_HOTKEY, key, 0))
                     self.assertEqual(first.events.get(timeout=2), action)
             finally:

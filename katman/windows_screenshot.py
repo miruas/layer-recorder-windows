@@ -29,20 +29,28 @@ def screenshot_settings():
 
 
 def screenshot_source(settings, target):
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    user32.GetForegroundWindow.restype = wintypes.HWND
     source = settings.get("record_area_option", "focused_monitor")
     if target == "screenshot_window" or source == "window":
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetForegroundWindow.restype = wintypes.HWND
         window = user32.GetForegroundWindow()
         if not window:
             raise RuntimeError("No active window to capture.")
         return ["-i", f"hwnd={window}"]
 
+    monitor = capture_monitor(source)
+    return desktop_source(monitor.x, monitor.y, monitor.width, monitor.height)
+
+
+def capture_monitor(source):
     monitors = displays()
     if not monitors:
         raise RuntimeError("No active monitor to capture.")
     monitor = next((item for item in monitors if source == "\\\\.\\" + item.name), None)
     if monitor is None:
+        if isinstance(source, str) and source.startswith("\\\\.\\"):
+            raise RuntimeError("The monitor selected in GSR is disconnected.")
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
         point = wintypes.POINT()
         user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
         user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
@@ -56,7 +64,7 @@ def screenshot_source(settings, target):
             user32.SetThreadDpiAwarenessContext(previous)
         monitor = next((item for item in monitors if item.x <= point.x < item.x + item.width
                         and item.y <= point.y < item.y + item.height), monitors[0])
-    return desktop_source(monitor.x, monitor.y, monitor.width, monitor.height)
+    return monitor
 
 
 def desktop_source(x, y, width, height):

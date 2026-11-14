@@ -15,7 +15,7 @@ import time
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import Capture, capture_binary, displays
 from .windows_hotkeys import GlobalHotkeys
-from .windows_screenshot import gsr_settings
+from .windows_screenshot import capture_monitor, gsr_settings
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
 
@@ -278,11 +278,22 @@ def capture_controls(library, *, background=False):
         rate, codec = int(fps.get()), encoder.get()
         seconds = 300
         configured_tracks = None
+        chosen_monitor = False
         if from_overlay:
             settings = gsr_settings(kind)
             record_options = settings.get("record_options")
             if isinstance(record_options, dict) and "audio_track_item" in record_options:
                 configured_tracks = record_options["audio_track_item"]
+            if isinstance(record_options, dict):
+                target = record_options.get("record_area_option")
+                if isinstance(target, str) and (target == "focused_monitor" or target.startswith("\\\\.\\")):
+                    try:
+                        selected = [capture_monitor(target)]
+                        chosen_monitor = True
+                    except (OSError, RuntimeError) as error:
+                        status.set(str(error))
+                        show()
+                        return
             configured_rate = record_options.get("fps") if isinstance(record_options, dict) else None
             if type(configured_rate) is int and 1 <= configured_rate <= 500:
                 rate = configured_rate
@@ -308,7 +319,7 @@ def capture_controls(library, *, background=False):
         if follow_audio and last_audio_inventory:
             sources = list({source.key: source for source in
                             [*sources, *(item for item in last_audio_inventory if item.kind == "application")]}.values())
-        follow_screens = follow_displays.get()
+        follow_screens = follow_displays.get() and not chosen_monitor
         replay_save_lengths = {}
         if from_overlay and kind == "replay":
             for action, key in (("save_short", "short_save_duration"), ("save_long", "long_save_duration")):
