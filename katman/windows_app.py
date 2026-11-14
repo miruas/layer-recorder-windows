@@ -15,6 +15,7 @@ import time
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import Capture, capture_binary, displays
 from .windows_hotkeys import GlobalHotkeys
+from .windows_screenshot import gsr_settings
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
 
@@ -107,6 +108,7 @@ def capture_controls(library, *, background=False):
     audio_options = []
     last_audio_inventory = None
     capture = None
+    replay_save_lengths = {}
     mode = None
     overlay = None
     overlay_dismissed = False
@@ -270,9 +272,21 @@ def capture_controls(library, *, background=False):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def start(kind):
+    def start(kind, *, from_overlay=False):
+        nonlocal replay_save_lengths
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
+        seconds = 300
+        if from_overlay:
+            settings = gsr_settings(kind)
+            record_options = settings.get("record_options")
+            configured_rate = record_options.get("fps") if isinstance(record_options, dict) else None
+            if type(configured_rate) is int and 1 <= configured_rate <= 500:
+                rate = configured_rate
+            if kind == "replay":
+                configured_seconds = settings.get("time")
+                if type(configured_seconds) is int and 1 <= configured_seconds <= 86400:
+                    seconds = configured_seconds
         sources = [audio_options[index] for index in audio_select.curselection()]
         if any(source.kind == "system" for source in sources) and (
                 follow_apps.get() or any(source.kind == "application" for source in sources)):
@@ -282,8 +296,14 @@ def capture_controls(library, *, background=False):
             sources = list({source.key: source for source in
                             [*sources, *(item for item in last_audio_inventory if item.kind == "application")]}.values())
         follow_screens, follow_audio = follow_displays.get(), follow_apps.get()
+        replay_save_lengths = {}
+        if from_overlay and kind == "replay":
+            for action, key in (("save_short", "short_save_duration"), ("save_long", "long_save_duration")):
+                duration = settings.get(key)
+                if type(duration) is int and 1 <= duration <= seconds:
+                    replay_save_lengths[action] = duration
         status.set("Starting capture…")
-        submit(kind, lambda: Capture(library, selected, rate, codec, record=kind == "record",
+        submit(kind, lambda: Capture(library, selected, rate, codec, seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
                                      follow_application_audio=follow_audio))
 
@@ -354,9 +374,9 @@ def capture_controls(library, *, background=False):
                 clipboard_owner = root.winfo_id()
                 submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
         elif not busy and action in {b"toggle_record", b"toggle_replay", b"save_replay", b"save_short", b"save_long"}:
-            handle_hotkey(action.decode("ascii"))
+            handle_hotkey(action.decode("ascii"), from_overlay=True)
 
-    def handle_hotkey(action):
+    def handle_hotkey(action, *, from_overlay=False):
         if action == "toggle_overlay":
             toggle_overlay()
         elif action in {"screenshot", "screenshot_window", "screenshot_region"}:
@@ -383,20 +403,21 @@ def capture_controls(library, *, background=False):
                 status.set(str(error))
         elif action == "toggle_record":
             if capture is None:
-                start("record")
+                start("record", from_overlay=from_overlay)
             elif mode == "record":
                 stop()
             else:
                 status.set("Stop replay before starting a normal recording.")
         elif action == "toggle_replay":
             if capture is None:
-                start("replay")
+                start("replay", from_overlay=from_overlay)
             elif mode == "replay":
                 stop()
             else:
                 status.set("Replay is already active with this recording.")
         elif capture is not None:
-            save(min(60, capture.seconds) if action == "save_short" else capture.seconds)
+            default = min(60, capture.seconds) if action == "save_short" else capture.seconds
+            save(replay_save_lengths.get(action, default))
         else:
             status.set("Start replay or recording before saving a replay.")
 

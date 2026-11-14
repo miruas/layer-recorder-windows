@@ -76,6 +76,10 @@ bool starts_with(std::string_view text, std::string_view prefix) {
 bool starts_with(std::string_view text, const char *prefix) {
     return starts_with(text, std::string_view(prefix));
 }
+bool ends_with(std::string_view text, const char *suffix) {
+    const std::string_view ending(suffix);
+    return text.size() >= ending.size() && text.substr(text.size() - ending.size()) == ending;
+}
 }
 
 #ifndef LAYER_GSR_CONFIG_LIBRARY

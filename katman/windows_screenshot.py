@@ -14,14 +14,18 @@ import time
 from .windows_capture import displays
 
 
-def screenshot_settings():
+def gsr_settings(section):
     folder = Path(os.environ["APPDATA"]) / "Layer" / "GSR"
     config = Path(os.environ.get("LAYER_GSR_CONFIG") or folder / "config_ui")
     try:
-        settings = json.loads(config.read_text(encoding="utf-8")).get("screenshot", {})
+        settings = json.loads(config.read_text(encoding="utf-8")).get(section, {})
     except (OSError, ValueError, AttributeError):
         return {}
     return settings if isinstance(settings, dict) else {}
+
+
+def screenshot_settings():
+    return gsr_settings("screenshot")
 
 
 def screenshot_source(settings, target):

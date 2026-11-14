@@ -35,7 +35,7 @@ $cppSources = @("$port/config.cpp", "$build/key_names.cpp",
 $cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils', 'Page', 'PageStack', 'StaticPage',
     'List', 'CustomRendererWidget', 'Label', 'Image', 'Button', 'ScreenshotSettingsPage',
     'GsrPage', 'ScrollablePage', 'Subsection', 'RadioButton', 'LineSeparator', 'ComboBox', 'CheckBox',
-    'Entry') | ForEach-Object { "$source/src/gui/$_.cpp" }
+    'Entry', 'SettingsPage') | ForEach-Object { "$source/src/gui/$_.cpp" }
 $cppSources += (Get-ChildItem "$pp/src" -Recurse -Filter '*.cpp' |
     Where-Object { $_.Name -ne 'Keyboard.cpp' }).FullName
 $objects = @()

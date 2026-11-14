@@ -5,6 +5,7 @@
 #include "GsrInfo.hpp"
 #include "gui/CustomRendererWidget.hpp"
 #include "gui/PageStack.hpp"
+#include "gui/SettingsPage.hpp"
 #include <mglpp/graphics/Rectangle.hpp>
 #include <mglpp/graphics/Sprite.hpp>
 #include <mglpp/graphics/Text.hpp>
@@ -29,15 +30,16 @@ public:
 
 private:
     void recreate_frontpage_ui_components();
-    void open_replay_settings_page() { action(FrontPageAction::replay_settings); }
+    void open_replay_settings_page() { open_capture_settings(SettingsPage::Type::REPLAY); }
     void on_press_save_replay() { action(FrontPageAction::replay_save); }
     void on_press_save_replay_1_min_replay() { action(FrontPageAction::replay_save_short); }
     void on_press_save_replay_10_min_replay() { action(FrontPageAction::replay_save_long); }
     void on_press_start_replay() { action(FrontPageAction::replay_toggle); }
-    void open_record_settings_page() { action(FrontPageAction::record_settings); }
+    void open_record_settings_page() { open_capture_settings(SettingsPage::Type::RECORD); }
     void toggle_pause() { action(FrontPageAction::record_pause); }
     void on_press_start_record() { action(FrontPageAction::record_toggle); }
-    void open_stream_settings_page() { action(FrontPageAction::stream_settings); }
+    void open_stream_settings_page() { open_capture_settings(SettingsPage::Type::STREAM); }
+    void open_capture_settings(SettingsPage::Type type);
     void on_press_start_stream() { action(FrontPageAction::stream_toggle); }
     void open_settings_page() { action(FrontPageAction::settings); }
     void open_screenshot_settings_page();

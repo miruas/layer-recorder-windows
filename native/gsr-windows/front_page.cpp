@@ -22,6 +22,10 @@ void WindowsFrontPage::open_screenshot_settings_page() {
     page_stack.push(std::make_unique<ScreenshotSettingsPage>(&gsr_info, config, &page_stack, false, true));
 }
 
+void WindowsFrontPage::open_capture_settings(SettingsPage::Type type) {
+    page_stack.push(std::make_unique<SettingsPage>(type, &gsr_info, config, &page_stack, false));
+}
+
 bool WindowsFrontPage::back() {
     if (page_stack.empty()) return false;
     page_stack.pop();

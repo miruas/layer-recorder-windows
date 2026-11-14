@@ -5,6 +5,9 @@
 #include <filesystem>
 
 namespace gsr {
+std::vector<AudioDevice> get_audio_devices() { return {}; }
+std::vector<std::string> get_application_audio() { return {}; }
+
 SupportedCaptureOptions get_supported_capture_options(const GsrInfo &) {
     SupportedCaptureOptions options;
     options.window = true;

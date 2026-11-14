@@ -55,7 +55,18 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     send(WM_LBUTTONDOWN, 403, 90);
     send(WM_LBUTTONUP, 403, 90);
     // Going back must return to the home page, then close the home page.
-    return page.back() && !page.back();
+    if (!page.back() || page.back()) return false;
+
+    // Exercise the original settings constructors and save hooks with the
+    // same platform adapters used by the running overlay.
+    gsr::PageStack stack;
+    using Type = gsr::SettingsPage::Type;
+    for (auto type : {Type::RECORD, Type::REPLAY, Type::STREAM}) {
+        stack.push(std::make_unique<gsr::SettingsPage>(type, &info, config, &stack, false));
+        stack.draw(window, {0, 0});
+        stack.pop();
+    }
+    return stack.empty();
 }
 
 static int test(const std::string &resources) {

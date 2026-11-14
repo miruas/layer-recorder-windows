@@ -70,5 +70,8 @@ shortcuts enabled, Print Screen saves the configured monitor or window and
 Shift+Print Screen saves the foreground window. PNG and JPEG use the
 configured directory and resolution. Clipboard output can be enabled
 independently of disk output. Ctrl+Print Screen opens a drag selector on the
-cursor monitor. Escape cancels selection. The other native GSR settings,
-pause and livestream still need integration.
+cursor monitor. Escape cancels selection. Record, Instant Replay and Livestream
+open their original GSR settings pages. Record and Replay launched from the
+overlay use the saved frame rate. Replay also uses its buffer and save lengths.
+Audio inventory and the remaining capture options still need wiring to those
+pages. Pause and livestream capture still need integration.
