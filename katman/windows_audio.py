@@ -507,12 +507,15 @@ def play_pcm(stream, ready, closed):
         api.waveOutClose(handle)
 
 
-def capture_audio_command(source):
+AUDIO_ENCODERS = {"aac": "aac", "opus": "libopus"}
+
+
+def capture_audio_command(source, codec="aac"):
     executable = Path(sys.executable)
     if executable.name.lower() == "pythonw.exe":
         executable = executable.with_name("python.exe")
     return [str(executable), "-m", "katman.windows_audio", "capture",
-            source.kind, source.endpoint, str(source.pid)]
+            source.kind, source.endpoint, str(source.pid), codec]
 
 
 def watch_stop(stop):
@@ -569,14 +572,18 @@ def child_job():
         kernel.CloseHandle(job)
 
 
-def capture(source):
-    stop = threading.Event()
-    threading.Thread(target=watch_stop, args=(stop,), daemon=True).start()
-    command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
+def audio_encoder_command(codec):
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
                "-f", "s16le", "-ar", str(AUDIO_TIMESCALE), "-ac", str(CHANNELS),
-               "-i", "pipe:0", "-c:a", "aac", "-b:a", "192k",
+               "-i", "pipe:0", "-c:a", AUDIO_ENCODERS[codec], "-b:a", "192k",
                "-frag_duration", "1000000", "-movflags",
                "empty_moov+default_base_moof+skip_trailer", "-f", "mp4", "pipe:1"]
+
+
+def capture(source, codec="aac"):
+    command = audio_encoder_command(codec)
+    stop = threading.Event()
+    threading.Thread(target=watch_stop, args=(stop,), daemon=True).start()
     with child_job() as attach:
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=sys.stdout.buffer,
                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -594,8 +601,8 @@ def capture(source):
 def main():
     command, *args = sys.argv[1:]
     if command == "capture":
-        kind, endpoint, pid = args
-        return capture(AudioSource("", "", kind, endpoint, int(pid)))
+        kind, endpoint, pid, *codec = args
+        return capture(AudioSource("", "", kind, endpoint, int(pid)), *codec)
     if command == "devices":
         import json
         print(json.dumps([{"key": source.key, "name": source.name, "endpoint": source.endpoint}

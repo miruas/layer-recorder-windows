@@ -43,6 +43,8 @@ The bundled overlay uses the original Layer-patched GSR interface for Replay, Re
 
 With GSR's **Auto** or **H264** codec, Layer uses NVIDIA NVENC when a short encode confirms that it can start. An explicit hardware choice in the recorder takes precedence. Choose **H264 Software Encoder** in GSR to force software encoding.
 
+GSR's **Audio codec** setting applies to the independent audio tracks for Record and Instant Replay. A replay saved during recording shares the active recording's encoded tracks. MOV and FLV output convert Opus tracks to AAC for container compatibility.
+
 ## Edit and export
 
 Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` directory together. Choose **Open editor** to browse the library or open an existing project. Studio mixes enabled audio tracks during timeline playback. **Record voiceover** captures the selected microphone and inserts a separate audio clip at the playhead.

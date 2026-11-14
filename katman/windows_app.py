@@ -341,6 +341,7 @@ def capture_controls(library, *, background=False):
         rate_control = None
         container = "mp4"
         replay_container = None
+        audio_codec = "aac"
         save_lengths = {}
         recording_directory = replay_directory = library
         configured_tracks = None
@@ -352,6 +353,7 @@ def capture_controls(library, *, background=False):
             recording_directory = gsr_save_directory(settings, library)
             replay_directory = gsr_save_directory(replay_settings, library)
             record_options = settings.get("record_options")
+            audio_codec = record_options.get("audio_codec", "opus") if isinstance(record_options, dict) else "opus"
             cursor = video_cursor(record_options)
             color_range = video_color_range(record_options)
             try:
@@ -422,7 +424,7 @@ def capture_controls(library, *, background=False):
                                      follow_application_audio=follow_audio, fixed_region=region,
                                      resolution=resolution, cursor=cursor, color_range=color_range,
                                      rate_control=rate_control, container=container, replay_directory=replay_directory,
-                                     replay_container=replay_container))
+                                     replay_container=replay_container, audio_codec=audio_codec))
 
     def stop():
         status.set("Finishing capture…")

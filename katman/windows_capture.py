@@ -425,7 +425,7 @@ class Capture:
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
                  color_range=None, rate_control=None, container="mp4", replay_directory=None,
-                 replay_container=None):
+                 replay_container=None, audio_codec="aac"):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -443,6 +443,9 @@ class Capture:
         self.container = recording_container({"container": container})
         self.replay_container = self.container if replay_container is None else recording_container(
             {"container": replay_container})
+        if audio_codec not in ("aac", "opus"):
+            raise ValueError("Select AAC or Opus in the GSR audio settings.")
+        self.audio_codec = audio_codec
         self.engine = CaptureEngine(seconds, self.memory_bytes)
         self.selected = {display.key for display in selected}
         self.audio = {source.key: source for source in audio}
@@ -505,7 +508,7 @@ class Capture:
             stem, timescale = "display", TIMESCALE
         else:
             from .windows_audio import AUDIO_TIMESCALE, capture_audio_command
-            command = capture_audio_command(source)
+            command = capture_audio_command(source, self.audio_codec)
             stem, timescale = "audio", AUDIO_TIMESCALE
             backend = "wasapi"
         path = self.record_folder / "media" / f"{stem}-{self.serial}.mp4" if self.record_folder else None
@@ -716,9 +719,12 @@ class Capture:
                 continue
             output = media.with_suffix(extension)
             pending = media.with_suffix(".pending" + extension)
+            codec = "copy"
+            if container in ("flv", "mov") and track.kind == "audio" and self.audio_codec == "opus":
+                codec = "aac"
             try:
                 subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(media),
-                                "-map", "0", "-c", "copy", "-f", container, str(pending)],
+                                "-map", "0", "-c", codec, "-f", container, str(pending)],
                                check=True, capture_output=True, timeout=120,
                                creationflags=subprocess.CREATE_NO_WINDOW)
                 pending.replace(output)

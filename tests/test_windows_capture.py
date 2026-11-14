@@ -12,7 +12,7 @@ from katman.export import export_project
 from katman.windows_capture import (
     Capture, Display, capture_binary, capture_command, desktop_duplication_command, gsr_h264_encoder,
 )
-from katman.windows_audio import AudioSource
+from katman.windows_audio import AudioSource, audio_encoder_command
 
 
 class ReplayTests(unittest.TestCase):
@@ -49,10 +49,12 @@ def synthetic_video(display, fps, encoder):
     return cmd
 
 
-def synthetic_audio(_source):
-    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi",
-            "-i", "sine=sample_rate=48000", "-c:a", "aac", "-frag_duration", "1000000",
-            "-movflags", "empty_moov+default_base_moof+skip_trailer", "-f", "mp4", "pipe:1"]
+def synthetic_audio(_source, codec):
+    command = audio_encoder_command(codec)
+    command[command.index("-f"):command.index("-c:a")] = [
+        "-re", "-f", "lavfi", "-i", "sine=sample_rate=48000",
+    ]
+    return command
 
 
 def wait_fragments(test, capture, track, count=1):
@@ -129,7 +131,7 @@ class ProjectTests(unittest.TestCase):
               patch("katman.windows_capture.capture_command", synthetic_video),
               patch("katman.windows_audio.capture_audio_command", synthetic_audio)):
             capture = Capture(directory, [first], fps=10, seconds=10, record=True,
-                              audio=[microphone], follow_application_audio=True)
+                              audio=[microphone], follow_application_audio=True, audio_codec="opus")
             try:
                 wait_fragments(self, capture, capture.active[first.key], 2)
                 self.assertEqual(capture.reconcile([], [microphone, application]), 0)
@@ -144,8 +146,14 @@ class ProjectTests(unittest.TestCase):
                 for source in replay["sources"]:
                     info = probe(replay_path.parent / source["file"])
                     self.assertEqual(info["streams"][0]["codec_type"], source["type"])
-                _, recording = load_project(capture.finish_recording())
+                    if source["type"] == "audio":
+                        self.assertEqual(info["streams"][0]["codec_name"], "opus")
+                recording_path, recording = load_project(capture.finish_recording())
                 self.assertEqual(len(recording["sources"]), 4)
+                for source in recording["sources"]:
+                    if source["type"] == "audio":
+                        self.assertEqual(probe(recording_path.parent / source["file"])["streams"][0]["codec_name"],
+                                         "opus")
                 clips = [track["clips"][0] for track in recording["studio"]["tracks"]]
                 self.assertGreater(clips[2]["start"], 0)
             finally:
