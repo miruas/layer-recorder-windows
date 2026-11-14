@@ -14,7 +14,7 @@ import time
 
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
-    Capture, Display, capture_binary, displays, foreground_window, video_color_range,
+    Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
     video_cursor, video_rate_control, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys
@@ -287,6 +287,7 @@ def capture_controls(library, *, background=False):
         cursor = None
         color_range = None
         rate_control = None
+        container = "mp4"
         configured_tracks = None
         chosen_monitor = False
         if use_gsr:
@@ -297,6 +298,7 @@ def capture_controls(library, *, background=False):
             try:
                 resolution = video_resolution(record_options)
                 rate_control = video_rate_control(record_options)
+                container = recording_container(settings)
             except ValueError as error:
                 status.set(str(error))
                 show()
@@ -364,7 +366,7 @@ def capture_controls(library, *, background=False):
                                      audio=sources, follow_displays=follow_screens,
                                      follow_application_audio=follow_audio, fixed_region=region,
                                      resolution=resolution, cursor=cursor, color_range=color_range,
-                                     rate_control=rate_control))
+                                     rate_control=rate_control, container=container))
 
     def stop():
         status.set("Finishing capture…")

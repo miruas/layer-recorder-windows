@@ -17,6 +17,14 @@ import uuid
 from .common import APP, atomic_json, probe
 
 TIMESCALE = 90_000
+RECORDING_CONTAINERS = {"mp4": ".mp4", "matroska": ".mkv", "mov": ".mov", "flv": ".flv"}
+
+
+def recording_container(settings):
+    container = settings.get("container", "mp4")
+    if not isinstance(container, str) or container not in RECORDING_CONTAINERS:
+        raise ValueError("Select MP4, MKV, MOV or FLV in the GSR recording settings.")
+    return container
 
 
 
@@ -355,7 +363,7 @@ class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
-                 color_range=None, rate_control=None):
+                 color_range=None, rate_control=None, container="mp4"):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -369,6 +377,7 @@ class Capture:
         self.encoder = encoder
         self.seconds = seconds
         self.memory_bytes = memory_mb * 1024**2
+        self.container = recording_container({"container": container})
         self.engine = CaptureEngine(seconds, self.memory_bytes)
         self.selected = {display.key for display in selected}
         self.audio = {source.key: source for source in audio}
@@ -594,8 +603,7 @@ class Capture:
                 raise RuntimeError(f"No media was completed. Recording folder: {self.record_folder}. "
                                    + " ".join(self.warnings))
             path = self.record_folder / "project.katman"
-            atomic_json(path, project_data(self.record_folder, "recording", tracks,
-                                           warnings=self.warnings))
+            self._write_project(path, "recording", tracks)
             self.final_project = path
             return path
         finally:
@@ -624,8 +632,42 @@ class Capture:
                 if first is not None:
                     tracks.append((track, media, start + first))
             path = folder / "project.katman"
-            atomic_json(path, project_data(folder, "replay", tracks, cutoff, end, self.warnings))
+            self._write_project(path, "replay", tracks, cutoff, end)
             return path
         except Exception:
             shutil.rmtree(folder)
             raise
+
+    def _write_project(self, path, kind, tracks, cutoff=None, end=None):
+        extension = RECORDING_CONTAINERS[self.container]
+        converted = []
+        cleanup = []
+        warnings = list(self.warnings)
+        for track, media, start in tracks:
+            if extension == media.suffix:
+                converted.append((track, media, start))
+                continue
+            output = media.with_suffix(extension)
+            pending = media.with_suffix(".pending" + extension)
+            try:
+                subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(media),
+                                "-map", "0", "-c", "copy", "-f", self.container, str(pending)],
+                               check=True, capture_output=True, timeout=120,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+                pending.replace(output)
+                converted.append((track, output, start))
+                cleanup.append((media, output))
+            except (OSError, subprocess.SubprocessError):
+                warnings.append(f"{media.name}: could not save as {extension}; kept the original MP4.")
+                converted.append((track, media, start))
+            finally:
+                pending.unlink(missing_ok=True)
+        project = project_data(path.parent, kind, converted, cutoff, end, warnings)
+        atomic_json(path, project)
+        used = {source["file"] for source in project["sources"]}
+        for original, output in cleanup:
+            if output.relative_to(path.parent).as_posix() in used:
+                try:
+                    original.unlink(missing_ok=True)
+                except OSError:
+                    pass
