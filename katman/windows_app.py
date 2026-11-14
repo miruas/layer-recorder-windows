@@ -18,7 +18,7 @@ from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
     ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
-    video_resolution, window_source,
+    video_framerate_mode, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -424,7 +424,8 @@ def capture_controls(library, *, background=False):
                                      follow_application_audio=follow_audio, fixed_region=region,
                                      resolution=resolution, cursor=cursor, color_range=color_range,
                                      rate_control=rate_control, container=container, replay_directory=replay_directory,
-                                     replay_container=replay_container, audio_codec=audio_codec))
+                                     replay_container=replay_container, audio_codec=audio_codec,
+                                     framerate_mode=video_framerate_mode(record_options)))
 
     def stop():
         status.set("Finishing capture…")
@@ -466,7 +467,8 @@ def capture_controls(library, *, background=False):
             options = settings.get("record_options")
             return Livestream(source, rate, gsr_h264_encoder(options, codec), destination, audio,
                               resolution=video_resolution(options), cursor=video_cursor(options),
-                              color_range=video_color_range(options), rate_control=video_rate_control(options))
+                              color_range=video_color_range(options), rate_control=video_rate_control(options),
+                              framerate_mode=video_framerate_mode(options))
 
         submit("stream_start", publish)
 

@@ -11,11 +11,24 @@ from katman.common import load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
     Capture, Display, capture_binary, capture_command, desktop_duplication_command, gsr_h264_encoder,
+    set_video_framerate_mode, video_framerate_mode,
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
 
 
 class ReplayTests(unittest.TestCase):
+    def test_gsr_frame_rate_mode_reaches_both_capture_backends(self):
+        display = Display("Primary", 0, 0, 1920, 1080, True)
+        for command in (capture_command(display, 60, "libx264"), desktop_duplication_command(display, 60)):
+            with self.subTest(command=command):
+                set_video_framerate_mode(command, video_framerate_mode({"framerate_mode": "vfr"}), 60)
+                self.assertEqual(command.count("-fps_mode"), 1)
+                self.assertEqual(command[command.index("-fps_mode") + 1], "vfr")
+                self.assertNotIn("-r", command)
+                set_video_framerate_mode(command, "cfr", 60)
+                self.assertEqual(command[command.index("-fps_mode") + 1], "cfr")
+                self.assertEqual(command[command.index("-r") + 1], "60")
+
     def test_gsr_auto_selects_working_nvenc_and_respects_explicit_encoder(self):
         with patch("katman.windows_capture.subprocess.run") as run:
             self.assertEqual(gsr_h264_encoder({"video_codec": "h264_software"}, "h264_nvenc"), "libx264")

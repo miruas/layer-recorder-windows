@@ -218,6 +218,24 @@ def desktop_duplication_command(display, fps):
     return command
 
 
+def video_framerate_mode(options):
+    mode = options.get("framerate_mode") if isinstance(options, dict) else None
+    return mode if mode in ("cfr", "vfr") else None
+
+
+def set_video_framerate_mode(command, mode, fps):
+    if mode is None:
+        return
+    for flag in ("-fps_mode", "-r"):
+        if flag in command:
+            index = command.index(flag)
+            del command[index:index + 2]
+    index = command.index("-c:v")
+    command[index:index] = ["-fps_mode", mode]
+    if mode == "cfr":
+        command[index + 2:index + 2] = ["-r", str(fps)]
+
+
 def video_resolution(options):
     if not isinstance(options, dict) or not options.get("change_video_resolution"):
         return None
@@ -425,7 +443,7 @@ class Capture:
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
                  color_range=None, rate_control=None, container="mp4", replay_directory=None,
-                 replay_container=None, audio_codec="aac"):
+                 replay_container=None, audio_codec="aac", framerate_mode=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -455,6 +473,7 @@ class Capture:
         self.cursor = cursor
         self.color_range = color_range
         self.rate_control = rate_control
+        self.framerate_mode = framerate_mode
         self.fixed_windows = [source for source in selected if source.window]
         self.follow_application_audio = follow_application_audio
         self.tracks = []
@@ -503,6 +522,7 @@ class Capture:
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             set_capture_cursor(command, self.cursor)
             set_video_rate_control(command, self.rate_control)
+            set_video_framerate_mode(command, self.framerate_mode, self.fps)
             if backend == "gdigrab":
                 set_video_color_range(command, self.color_range)
             stem, timescale = "display", TIMESCALE

@@ -7,7 +7,10 @@ from queue import Empty, Full, Queue
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-from .windows_capture import capture_command, scale_video, set_capture_cursor, set_video_color_range, set_video_rate_control
+from .windows_capture import (
+    capture_command, scale_video, set_capture_cursor, set_video_color_range,
+    set_video_framerate_mode, set_video_rate_control,
+)
 from .windows_audio import AUDIO_TIMESCALE, CHANNELS, FRAME_BYTES, capture_pcm, gsr_audio_selection
 
 
@@ -149,12 +152,13 @@ def mix_audio(sources, output, stop):
 
 class Livestream:
     def __init__(self, display, fps, encoder, destination, audio=(), *, resolution=None, cursor=None,
-                 color_range=None, rate_control=None):
+                 color_range=None, rate_control=None, framerate_mode=None):
         whip = isinstance(destination, WhipDestination)
         command = scale_video(capture_command(display, fps, encoder), resolution)
         set_capture_cursor(command, cursor)
         set_video_color_range(command, color_range)
         set_video_rate_control(command, rate_control)
+        set_video_framerate_mode(command, framerate_mode, fps)
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
         if audio:
