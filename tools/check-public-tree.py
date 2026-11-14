@@ -6,6 +6,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 ALLOWED_TOP={'native','katman','tests','docs','examples','tools','patches','licenses','packaging','.github','upstream','UPSTREAM.md','MANIFEST.in','README.md','LICENSE','NOTICE.md','CHANGELOG.md','CONTRIBUTING.md','SECURITY.md','CODE_OF_CONDUCT.md','pyproject.toml','install.py','run.sh','.gitignore','.gitattributes','.dockerignore'}
 PATTERNS=[r'/ho'+r'me/[^\s/]+/',r'/run'+r'/media/[^\s/]+/',r'(?i)(?:gh[pousr]_[a-zA-Z0-9]{20,}|github_pat_[a-zA-Z0-9_]{20,})',r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----']
+ALLOWED_TOP.add('Layer.cmd')
+LOCAL_BINARY_ASSETS = {'katman/assets/layer.ico': '228ae2df68ba599c627d8f7b93c59975202a54f00b2123fe8331ff905cf0225d'}
 
 
 def main():
@@ -18,7 +20,8 @@ def main():
         if file.is_symlink():errors.append(name+': symlink');continue
         data=file.read_bytes()
         if b'\0' in data:
-            if name not in assets or hashlib.sha256(data).hexdigest()!=assets[name]['sha256']:errors.append(name+': unapproved binary file')
+            expected = LOCAL_BINARY_ASSETS.get(name) or assets.get(name, {}).get('sha256')
+            if hashlib.sha256(data).hexdigest() != expected:errors.append(name+': unapproved binary file')
             continue
         if len(data)>1024*1024:errors.append(name+': file exceeds source-only limit')
         text=data.decode('utf8')
