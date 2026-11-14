@@ -149,6 +149,23 @@ def desktop_duplication_command(display, fps):
     return command
 
 
+def video_resolution(options):
+    if not isinstance(options, dict) or not options.get("change_video_resolution"):
+        return None
+    width, height = options.get("video_width"), options.get("video_height")
+    if not all(type(value) is int and 32 <= value <= 32768 for value in (width, height)):
+        raise ValueError("Set a valid output width and height in the GSR capture settings.")
+    # H.264 with 4:2:0 chroma requires even coded dimensions.
+    return width + width % 2, height + height % 2
+
+
+def scale_video(command, resolution):
+    if resolution is not None:
+        width, height = resolution
+        command[command.index("-vf") + 1] = f"scale={width}:{height},setsar=1"
+    return command
+
+
 def capture_binary():
     return Path(os.environ.get("LAYER_CAPTURE_BINARY", APP / "bin/layer-capture.exe"))
 
@@ -254,7 +271,7 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
 class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
-                 follow_application_audio=False, fixed_region=None):
+                 follow_application_audio=False, fixed_region=None, resolution=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -273,6 +290,7 @@ class Capture:
         self.audio = {source.key: source for source in audio}
         self.follow_displays = follow_displays
         self.fixed_region = fixed_region
+        self.resolution = resolution
         self.fixed_windows = [source for source in selected if source.window]
         self.follow_application_audio = follow_application_audio
         self.tracks = []
@@ -307,7 +325,7 @@ class Capture:
         self.single_display = current[0] if len(current) == 1 and current[0].primary else None
 
     def _backend(self, source):
-        if (self.encoder == "h264_nvenc" and source == self.single_display and
+        if (self.resolution is None and self.encoder == "h264_nvenc" and source == self.single_display and
                 source.key not in self.duplication_failed and source.width % 2 == source.height % 2 == 0):
             return "ddagrab"
         return "gdigrab"
@@ -317,7 +335,7 @@ class Capture:
         if isinstance(source, Display):
             backend = self._backend(source)
             command = (desktop_duplication_command(source, self.fps) if backend == "ddagrab"
-                       else capture_command(source, self.fps, self.encoder))
+                       else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             stem, timescale = "display", TIMESCALE
         else:
             from .windows_audio import AUDIO_TIMESCALE, capture_audio_command

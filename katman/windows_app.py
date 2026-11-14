@@ -13,7 +13,7 @@ import threading
 import time
 
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
-from .windows_capture import Capture, Display, capture_binary, displays, foreground_window, window_source
+from .windows_capture import Capture, Display, capture_binary, displays, foreground_window, video_resolution, window_source
 from .windows_hotkeys import GlobalHotkeys
 from .windows_screenshot import capture_monitor, gsr_settings
 
@@ -280,11 +280,18 @@ def capture_controls(library, *, background=False):
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
         seconds = 300
+        resolution = None
         configured_tracks = None
         chosen_monitor = False
         if use_gsr:
             settings = gsr_settings(kind)
             record_options = settings.get("record_options")
+            try:
+                resolution = video_resolution(record_options)
+            except ValueError as error:
+                status.set(str(error))
+                show()
+                return
             if isinstance(record_options, dict) and "audio_track_item" in record_options:
                 configured_tracks = record_options["audio_track_item"]
             if isinstance(record_options, dict):
@@ -346,7 +353,8 @@ def capture_controls(library, *, background=False):
         status.set("Starting capture…")
         submit(kind, lambda: Capture(library, selected, rate, codec, seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
-                                     follow_application_audio=follow_audio, fixed_region=region))
+                                     follow_application_audio=follow_audio, fixed_region=region,
+                                     resolution=resolution))
 
     def stop():
         status.set("Finishing capture…")
@@ -385,7 +393,8 @@ def capture_controls(library, *, background=False):
 
         def publish():
             audio = stream_audio_sources(settings, read_audio_inventory())
-            return Livestream(source, rate, codec, destination, audio)
+            return Livestream(source, rate, codec, destination, audio,
+                              resolution=video_resolution(settings.get("record_options")))
 
         submit("stream_start", publish)
 
