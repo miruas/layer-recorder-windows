@@ -39,8 +39,7 @@ After preparing the pinned sources, run:
 The test links the pinned MGL window API and rectangle renderer against a
 Win32/WGL backend. It checks rendered pixels, monitor enumeration, resize,
 Unicode input, key translation and window recreation on a Windows desktop.
-The backend provides the foundation for the original GSR widgets. Transparent
-desktop compositing still needs integration.
+The backend provides the foundation for the original GSR widgets.
 
 ## Original Layer-patched GSR front page on Windows
 
@@ -54,12 +53,13 @@ clicks the first action on Instant Replay, Record, Livestream and Recordings,
 and checks the header close button in a hidden Win32 window.
 
 The same build produces `layer-gsr-overlay.exe`. The executable takes the
-GSR resource directory as its argument. It captures one frame of the cursor
-monitor into memory before showing its borderless window, then draws the
-original GSR dim layer and controls over that frame. Run
+GSR resource directory as its argument. Windows composites the original GSR
+dim layer and controls over the live desktop using per-pixel alpha. If the
+compositor cannot initialize, the overlay uses a desktop snapshot. Region
+selection also uses a snapshot. Run
 `tools/test-gsr-windows-overlay.ps1` after building to verify monitor coverage
-and Escape dismissal on the interactive Windows desktop. The backdrop is
-static while open. Build with `-OverlayDirectory build/native/windows-overlay-package/overlay`
+and Escape dismissal on the interactive Windows desktop. Build with
+`-OverlayDirectory build/native/windows-overlay-package/overlay`
 to stage the resources and runtime dependencies for the Windows packages.
 The Layer tray and Alt+Z launch that overlay. Record, Replay, Replay Save
 and Recordings dispatch to the existing Windows capture controller and Studio.

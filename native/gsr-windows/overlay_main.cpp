@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <windows.h>
+#include <GL/gl.h>
 #include <algorithm>
 #include <chrono>
 #include "front_page.hpp"
@@ -16,6 +17,48 @@
 #include <string_view>
 
 namespace {
+class DesktopComposition {
+public:
+    ~DesktopComposition() {
+        if (original) SelectObject(dc, original);
+        if (bitmap) DeleteObject(bitmap);
+        if (dc) DeleteDC(dc);
+    }
+
+    bool initialize(mgl::vec2i size) {
+        GLint alpha = 0;
+        glGetIntegerv(GL_ALPHA_BITS, &alpha);
+        if (alpha < 8) return false;
+        this->size = {size.x, size.y};
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(info.bmiHeader);
+        info.bmiHeader.biWidth = size.x;
+        info.bmiHeader.biHeight = size.y;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        dc = CreateCompatibleDC(nullptr);
+        if (!dc) return false;
+        bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+        if (!bitmap) return false;
+        original = SelectObject(dc, bitmap);
+        return original != nullptr;
+    }
+
+    bool present(HWND window) {
+        glReadPixels(0, 0, size.cx, size.cy, 0x80E1 /* GL_BGRA */, GL_UNSIGNED_BYTE, pixels);
+        POINT origin{};
+        BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+        return UpdateLayeredWindow(window, nullptr, nullptr, &size, dc, &origin, 0, &blend, ULW_ALPHA);
+    }
+
+private:
+    HDC dc = nullptr;
+    HBITMAP bitmap = nullptr;
+    HGDIOBJ original = nullptr;
+    void *pixels = nullptr;
+    SIZE size{};
+};
+
 bool capture_backdrop(const RECT &bounds, mgl::Texture &texture) {
     const int width = bounds.right - bounds.left;
     const int height = bounds.bottom - bounds.top;
@@ -116,6 +159,7 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
     mgl::Window window;
     mgl::Window::CreateParams params;
     params.hidden = true;
+    params.support_alpha = mode != L"region";
     params.size = {0, 0};
     params.window_type = MGL_WINDOW_TYPE_OVERLAY;
     if (!window.create("GPU Screen Recorder", params)) return 2;
@@ -123,7 +167,16 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
     RECT bounds{};
     if (!GetWindowRect(hwnd, &bounds)) return 3;
     mgl::Texture backdrop;
-    if (!capture_backdrop(bounds, backdrop)) return 4;
+    DesktopComposition composition;
+    const auto styles = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    bool live = params.support_alpha && composition.initialize(window.get_size());
+    if (live) {
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, styles | WS_EX_LAYERED);
+        window.clear({0, 0, 0, 100});
+        live = composition.present(hwnd);
+        if (!live) SetWindowLongPtrW(hwnd, GWL_EXSTYLE, styles);
+    }
+    if (!live && !capture_backdrop(bounds, backdrop)) return 4;
     if (mode == L"region") {
         select_region(window, bounds, backdrop);
         return 0;
@@ -176,10 +229,11 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
         page.set_capture_state(recording, recording || capture == L"replay", capture == L"paused", streaming);
         mgl::Sprite desktop(&backdrop);
         auto draw = [&] {
-            window.clear();
-            window.draw(desktop);
+            window.clear(live ? mgl::Color(0, 0, 0, 0) : mgl::Color(0, 0, 0, 255));
+            if (!live) window.draw(desktop);
             page.draw(window);
-            window.display();
+            if (live) composition.present(hwnd);
+            else window.display();
         };
         draw();
         window.set_visible(true);

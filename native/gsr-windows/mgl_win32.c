@@ -383,8 +383,10 @@ bool layer_mgl_win32_init(mgl_window *self, const char *name, const mgl_window_c
     if (!window) return false;
     self->impl = window;
     const HINSTANCE instance = GetModuleHandleW(NULL);
-    WNDCLASSW wc = {.style=CS_OWNDC, .lpfnWndProc=dispatch, .hInstance=instance,
-        .hCursor=LoadCursorW(NULL, MAKEINTRESOURCEW(32512)), .lpszClassName=L"LayerMglWindow"};
+    const bool layered = params && params->support_alpha && params->window_type == MGL_WINDOW_TYPE_OVERLAY;
+    WNDCLASSW wc = {.style=layered ? 0 : CS_OWNDC, .lpfnWndProc=dispatch, .hInstance=instance,
+        .hCursor=LoadCursorW(NULL, MAKEINTRESOURCEW(32512)),
+        .lpszClassName=layered ? L"LayerMglAlphaWindow" : L"LayerMglWindow"};
     if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) goto fail;
     const bool overlay = params && params->window_type == MGL_WINDOW_TYPE_OVERLAY;
     DWORD style = overlay || (params && params->hide_decorations) ? WS_POPUP : WS_OVERLAPPEDWINDOW;
