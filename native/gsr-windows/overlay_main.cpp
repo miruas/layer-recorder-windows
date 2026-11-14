@@ -142,6 +142,11 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
         bool open = true;
         gsr::WindowsFrontPage page(config, info, [&](gsr::FrontPageAction action) {
             using Action = gsr::FrontPageAction;
+            if (action == Action::suspend_hotkeys || action == Action::resume_hotkeys) {
+                std::puts(action == Action::suspend_hotkeys ? "suspend_hotkeys" : "resume_hotkeys");
+                std::fflush(stdout);
+                return;
+            }
             const char *name = nullptr;
             switch (action) {
             case Action::replay_toggle: name = "toggle_replay"; break;

@@ -124,6 +124,9 @@ def capture_controls(library, *, background=False):
     replay_save_lengths = {}
     mode = None
     overlay = None
+    overlay_messages = None
+    overlay_action = b""
+    overlay_hotkeys_suspended = False
     overlay_dismissed = False
     overlay_region_capture = None
     overlay_window = None
@@ -242,7 +245,8 @@ def capture_controls(library, *, background=False):
 
     def apply_hotkeys():
         nonlocal hotkeys
-        if hotkey_setting.get() and gsr_settings("main").get("hotkeys_enable_option") != "disable_hotkeys":
+        if (not overlay_hotkeys_suspended and hotkey_setting.get()
+                and gsr_settings("main").get("hotkeys_enable_option") != "disable_hotkeys"):
             bindings, unsupported = hotkey_bindings(gsr_settings)
             if hotkeys:
                 if (hotkeys.bindings, hotkeys.unsupported) == (bindings, unsupported):
@@ -450,6 +454,7 @@ def capture_controls(library, *, background=False):
 
     def launch_overlay(overlay_mode, *, region_capture=None):
         nonlocal overlay, overlay_dismissed, overlay_region_capture, overlay_window
+        nonlocal overlay_messages, overlay_action
         if overlay is not None:
             return
         executable = APP / "overlay/layer-gsr-overlay.exe"
@@ -467,16 +472,42 @@ def capture_controls(library, *, background=False):
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory},
             )
+            overlay_action = b""
+            overlay_messages = queue.SimpleQueue()
+
+            def read_messages(pipe, messages):
+                try:
+                    with pipe:
+                        for line in pipe:
+                            messages.put(line.strip())
+                finally:
+                    messages.put(None)
+
+            threading.Thread(target=read_messages, args=(overlay.stdout, overlay_messages), daemon=True).start()
         except OSError as error:
             status.set(f"Could not open the GSR overlay: {error}")
             show()
 
     def poll_overlay():
-        nonlocal overlay
-        if overlay is None or overlay.poll() is None:
+        nonlocal overlay, overlay_action, overlay_hotkeys_suspended
+        if overlay is None:
             return
+        while True:
+            try:
+                message = overlay_messages.get_nowait()
+            except queue.Empty:
+                return
+            if message is None:
+                break
+            if message in (b"suspend_hotkeys", b"resume_hotkeys"):
+                overlay_hotkeys_suspended = message == b"suspend_hotkeys"
+                apply_hotkeys()
+            else:
+                overlay_action = message
         finished, overlay = overlay, None
-        action = finished.communicate()[0].strip()
+        finished.wait()
+        action = overlay_action
+        overlay_hotkeys_suspended = False
         apply_hotkeys()
         if overlay_dismissed:
             return
@@ -812,7 +843,7 @@ def capture_controls(library, *, background=False):
     finally:
         stop_overlay()
         if overlay is not None:
-            overlay.communicate()
+            overlay.wait()
         if tray:
             tray.stop()
         if hotkeys:

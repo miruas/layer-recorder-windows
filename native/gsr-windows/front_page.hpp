@@ -16,7 +16,8 @@ class DropdownButton;
 enum class FrontPageAction {
     replay_toggle, replay_save, replay_save_short, replay_save_long, replay_settings,
     record_toggle, record_pause, record_settings,
-    stream_toggle, stream_settings, recordings, settings, exit_application
+    stream_toggle, stream_settings, recordings, settings, exit_application,
+    suspend_hotkeys, resume_hotkeys
 };
 
 class WindowsFrontPage {
@@ -33,8 +34,8 @@ public:
     void open_stream_settings_page() { open_capture_settings(SettingsPage::Type::STREAM); }
     void open_screenshot_settings_page();
     void show_hotkey_error(const std::string &message);
-    void rebind_all_keyboard_hotkeys() {}
-    void unbind_all_keyboard_hotkeys() {}
+    void rebind_all_keyboard_hotkeys() { action(FrontPageAction::resume_hotkeys); }
+    void unbind_all_keyboard_hotkeys() { action(FrontPageAction::suspend_hotkeys); }
 
 private:
     void recreate_frontpage_ui_components();
