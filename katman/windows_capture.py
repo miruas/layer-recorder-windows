@@ -51,6 +51,23 @@ def ac_power_connected():
     return bool(query(ctypes.byref(status)) and status.ac == 1)
 
 
+def running_steam_game():
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            app_id, kind = winreg.QueryValueEx(key, "RunningAppID")
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam\ActiveProcess") as key:
+            pid, pid_kind = winreg.QueryValueEx(key, "pid")
+    except OSError:
+        return None
+    if kind != winreg.REG_DWORD or pid_kind != winreg.REG_DWORD or not app_id or not pid:
+        return None
+    from .windows_audio import process_name
+    name = process_name(pid)
+    return app_id if name and name.casefold() == "steam" else None
+
+
 
 @dataclass(frozen=True)
 class Display:

@@ -15,7 +15,7 @@ import time
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
-    ac_power_connected, replay_durations, video_cursor, video_rate_control, video_resolution, window_source,
+    ac_power_connected, replay_durations, running_steam_game, video_cursor, video_rate_control, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -131,6 +131,7 @@ def capture_controls(library, *, background=False):
     next_inventory = 0.0
     next_power_check = 0.0
     last_startup_power = None
+    last_startup_game = None
     startup_replay = False
     next_audio_inventory = 0.0
     active_display_count = None
@@ -765,17 +766,22 @@ def capture_controls(library, *, background=False):
     update_buttons()
     root.after(150, poll)
     def check_replay_startup():
-        nonlocal last_startup_power, startup_replay
+        nonlocal last_startup_power, last_startup_game, startup_replay
         settings = gsr_settings("replay")
-        if settings.get("turn_on_replay_automatically_mode") != "turn_on_at_system_startup":
+        preference = settings.get("turn_on_replay_automatically_mode")
+        game_mode = preference in ("turn_on_at_game_launch", "turn_on_at_fullscreen")
+        if preference != "turn_on_at_system_startup" and not game_mode:
             last_startup_power = None
+            last_startup_game = None
             return
         plugged_only = settings.get("only_start_replay_if_power_supply_connected") is True
-        allowed = not plugged_only or ac_power_connected()
+        game = running_steam_game() if game_mode else None
+        previous_game, last_startup_game = last_startup_game, game
+        allowed = (not plugged_only or ac_power_connected()) and (not game_mode or game is not None)
         previous, last_startup_power = last_startup_power, allowed
         if startup_replay and capture is not None and not allowed:
             stop()
-        elif allowed and previous is not True and capture is None:
+        elif allowed and (previous is not True or game != previous_game) and capture is None:
             options = settings.get("record_options")
             target = options.get("record_area_option") if isinstance(options, dict) else None
             if target not in ("window", "region"):
