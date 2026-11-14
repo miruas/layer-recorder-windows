@@ -77,6 +77,10 @@ When Region is selected, Record and Replay open the same drag selector and
 capture only the selected rectangle.
 Window capture targets the foreground window when the overlay opens.
 Shift+F9 starts or stops recording the foreground window directly.
+With global shortcuts enabled, Alt+F9 toggles recording, Ctrl+F9 selects
+a recording region, and Shift+Alt+F10 toggles Instant Replay. Alt+F10,
+Alt+F11 and Alt+F12 save the full, short and long replay, respectively.
+Win+Alt+Z opens Layer Studio.
 The original settings list Windows audio endpoints and active applications
 from WASAPI. Record and Replay use the selected sources as independent Layer
 tracks. Inverted application audio, mixing multiple sources into one GSR

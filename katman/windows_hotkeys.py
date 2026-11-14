@@ -20,6 +20,13 @@ ADDITIONAL_HOTKEYS = {
     0x178: (0x0004, "toggle_window_record", "Shift+F9"),
     0x176: (0x0001, "toggle_pause", "Alt+F7"),
     0x177: (0x0001, "toggle_stream", "Alt+F8"),
+    0x278: (0x0001, "gsr_toggle_record", "Alt+F9"),
+    0x378: (0x0002, "toggle_region_record", "Ctrl+F9"),
+    0x179: (0x0005, "gsr_toggle_replay", "Shift+Alt+F10"),
+    0x279: (0x0001, "save_replay", "Alt+F10"),
+    0x17A: (0x0001, "save_short", "Alt+F11"),
+    0x17B: (0x0001, "save_long", "Alt+F12"),
+    0x15A: (0x0009, "editor", "Win+Alt+Z"),
 }
 WM_HOTKEY = 0x0312
 WM_QUIT = 0x0012

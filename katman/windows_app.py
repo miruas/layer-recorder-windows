@@ -275,14 +275,14 @@ def capture_controls(library, *, background=False):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def start(kind, *, from_overlay=False, region=None, force_window=False):
+    def start(kind, *, use_gsr=False, window_handle=None, region=None, force_window=False):
         nonlocal replay_save_lengths
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
         seconds = 300
         configured_tracks = None
         chosen_monitor = False
-        if from_overlay:
+        if use_gsr:
             settings = gsr_settings(kind)
             record_options = settings.get("record_options")
             if isinstance(record_options, dict) and "audio_track_item" in record_options:
@@ -307,10 +307,10 @@ def capture_controls(library, *, background=False):
                 configured_seconds = settings.get("time")
                 if type(configured_seconds) is int and 1 <= configured_seconds <= 86400:
                     seconds = configured_seconds
-        if force_window or (from_overlay and isinstance(record_options, dict)
+        if force_window or (use_gsr and isinstance(record_options, dict)
                             and record_options.get("record_area_option") == "window"):
             try:
-                selected = [window_source(overlay_window if from_overlay else foreground_window())]
+                selected = [window_source(window_handle if window_handle is not None else foreground_window())]
                 chosen_monitor = True
             except RuntimeError as error:
                 status.set(str(error))
@@ -338,7 +338,7 @@ def capture_controls(library, *, background=False):
             selected = [region]
         follow_screens = follow_displays.get() and not chosen_monitor and region is None
         replay_save_lengths = {}
-        if from_overlay and kind == "replay":
+        if use_gsr and kind == "replay":
             for action, key in (("save_short", "short_save_duration"), ("save_long", "long_save_duration")):
                 duration = settings.get(key)
                 if type(duration) is int and 1 <= duration <= seconds:
@@ -407,6 +407,8 @@ def capture_controls(library, *, background=False):
 
     def launch_overlay(overlay_mode, *, region_capture=None):
         nonlocal overlay, overlay_dismissed, overlay_region_capture, overlay_window
+        if overlay is not None:
+            return
         executable = APP / "overlay/layer-gsr-overlay.exe"
         resources = APP / "overlay/resources"
         try:
@@ -465,7 +467,7 @@ def capture_controls(library, *, background=False):
                             status.set(str(error))
                             show()
                         return
-                    start(overlay_region_capture, from_overlay=True, region=region)
+                    start(overlay_region_capture, use_gsr=True, region=region)
                     return
                 source = desktop_source(x, y, width, height)
                 settings = screenshot_settings()
@@ -506,16 +508,25 @@ def capture_controls(library, *, background=False):
                 submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
                 status.set(str(error))
-        elif action in {"toggle_record", "toggle_window_record"}:
+        elif action == "editor":
+            open_editor()
+        elif action in {"toggle_record", "gsr_toggle_record", "toggle_window_record", "toggle_region_record"}:
             if capture is None:
-                start("record", from_overlay=from_overlay, force_window=action == "toggle_window_record")
+                if action == "toggle_region_record":
+                    if overlay is None:
+                        launch_overlay("region", region_capture="record")
+                else:
+                    start("record", use_gsr=from_overlay or action != "toggle_record",
+                          window_handle=overlay_window if from_overlay else None,
+                          force_window=action == "toggle_window_record")
             elif mode == "record":
                 stop()
             else:
                 status.set("Stop replay before starting a normal recording.")
-        elif action == "toggle_replay":
+        elif action in {"toggle_replay", "gsr_toggle_replay"}:
             if capture is None:
-                start("replay", from_overlay=from_overlay)
+                start("replay", use_gsr=from_overlay or action == "gsr_toggle_replay",
+                      window_handle=overlay_window if from_overlay else None)
             elif mode == "replay":
                 stop()
             else:
