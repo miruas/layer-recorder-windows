@@ -13,7 +13,7 @@ import threading
 import time
 
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
-from .windows_capture import Capture, capture_binary, displays
+from .windows_capture import Capture, Display, capture_binary, displays
 from .windows_hotkeys import GlobalHotkeys
 from .windows_screenshot import capture_monitor, gsr_settings
 
@@ -112,6 +112,7 @@ def capture_controls(library, *, background=False):
     mode = None
     overlay = None
     overlay_dismissed = False
+    overlay_region_capture = None
     hotkeys = None
     next_inventory = 0.0
     next_audio_inventory = 0.0
@@ -272,7 +273,7 @@ def capture_controls(library, *, background=False):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def start(kind, *, from_overlay=False):
+    def start(kind, *, from_overlay=False, region=None):
         nonlocal replay_save_lengths
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
@@ -286,6 +287,9 @@ def capture_controls(library, *, background=False):
                 configured_tracks = record_options["audio_track_item"]
             if isinstance(record_options, dict):
                 target = record_options.get("record_area_option")
+                if target == "region" and region is None:
+                    launch_overlay("region", region_capture=kind)
+                    return
                 if isinstance(target, str) and (target == "focused_monitor" or target.startswith("\\\\.\\")):
                     try:
                         selected = [capture_monitor(target)]
@@ -319,7 +323,9 @@ def capture_controls(library, *, background=False):
         if follow_audio and last_audio_inventory:
             sources = list({source.key: source for source in
                             [*sources, *(item for item in last_audio_inventory if item.kind == "application")]}.values())
-        follow_screens = follow_displays.get() and not chosen_monitor
+        if region is not None:
+            selected = [region]
+        follow_screens = follow_displays.get() and not chosen_monitor and region is None
         replay_save_lengths = {}
         if from_overlay and kind == "replay":
             for action, key in (("save_short", "short_save_duration"), ("save_long", "long_save_duration")):
@@ -329,7 +335,7 @@ def capture_controls(library, *, background=False):
         status.set("Starting capture…")
         submit(kind, lambda: Capture(library, selected, rate, codec, seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
-                                     follow_application_audio=follow_audio))
+                                     follow_application_audio=follow_audio, fixed_region=region))
 
     def stop():
         status.set("Finishing capture…")
@@ -354,12 +360,13 @@ def capture_controls(library, *, background=False):
         else:
             launch_overlay(mode or "idle")
 
-    def launch_overlay(overlay_mode):
-        nonlocal overlay, overlay_dismissed
+    def launch_overlay(overlay_mode, *, region_capture=None):
+        nonlocal overlay, overlay_dismissed, overlay_region_capture
         executable = APP / "overlay/layer-gsr-overlay.exe"
         resources = APP / "overlay/resources"
         try:
             overlay_dismissed = False
+            overlay_region_capture = region_capture
             from .windows_audio import gsr_audio_inventory
 
             inventory = gsr_audio_inventory(last_audio_inventory or ())
@@ -394,10 +401,17 @@ def capture_controls(library, *, background=False):
             bounds = action.split()[1:]
             if len(bounds) == 4:
                 try:
-                    source = desktop_source(*(int(value) for value in bounds))
+                    x, y, width, height = (int(value) for value in bounds)
+                    if min(width, height) < 2:
+                        raise ValueError("Invalid region dimensions")
                 except ValueError:
                     status.set("The GSR region coordinates were invalid.")
                     return
+                if overlay_region_capture:
+                    region = Display("Selected region", x, y, width, height)
+                    start(overlay_region_capture, from_overlay=True, region=region)
+                    return
+                source = desktop_source(x, y, width, height)
                 settings = screenshot_settings()
                 clipboard_owner = root.winfo_id()
                 submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))

@@ -224,7 +224,7 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
 class Capture:
     def __init__(self, library, selected, fps=30, encoder="libx264", seconds=300,
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
-                 follow_application_audio=False):
+                 follow_application_audio=False, fixed_region=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -242,6 +242,7 @@ class Capture:
         self.selected = {display.key for display in selected}
         self.audio = {source.key: source for source in audio}
         self.follow_displays = follow_displays
+        self.fixed_region = fixed_region
         self.follow_application_audio = follow_application_audio
         self.tracks = []
         self.active = {}
@@ -322,6 +323,13 @@ class Capture:
         self._update_duplication_layout(current)
         desired = {display.key: display for display in current
                    if self.follow_displays or display.key in self.selected}
+        if self.fixed_region is not None:
+            region = self.fixed_region
+            # Keep the region only while a monitor contains its full rectangle.
+            if any(display.x <= region.x and display.y <= region.y and
+                   region.x + region.width <= display.x + display.width and
+                   region.y + region.height <= display.y + display.height for display in current):
+                desired[region.key] = region
         if current_audio is None:
             desired.update(self.audio)
             desired.update((key, track.source) for key, track in self.active.items()
