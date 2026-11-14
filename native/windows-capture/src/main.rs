@@ -120,6 +120,7 @@ struct Ring {
 
 struct Buffer {
     epoch: Instant,
+    paused_at: Option<Instant>,
     seconds: f64,
     limit: usize,
     bytes: usize,
@@ -127,7 +128,10 @@ struct Buffer {
 }
 impl Buffer {
     fn now(&self) -> f64 {
-        self.epoch.elapsed().as_secs_f64()
+        self.paused_at
+            .unwrap_or_else(Instant::now)
+            .duration_since(self.epoch)
+            .as_secs_f64()
     }
 
     fn trim(&mut self) {
@@ -391,6 +395,21 @@ fn handle(
     children: &mut BTreeMap<u64, Producer>,
 ) -> Result<Value> {
     match request["op"].as_str().unwrap_or_default() {
+        "pause_clock" => {
+            state
+                .lock()
+                .unwrap()
+                .paused_at
+                .get_or_insert_with(Instant::now);
+            Ok(Value::Null)
+        }
+        "resume_clock" => {
+            let mut state = state.lock().unwrap();
+            if let Some(started) = state.paused_at.take() {
+                state.epoch += started.elapsed();
+            }
+            Ok(Value::Null)
+        }
         "start" => {
             let id = id_of(&request)?;
             let args: Vec<String> = serde_json::from_value(request["command"].clone())?;
@@ -514,6 +533,7 @@ fn run() -> Result<()> {
     );
     let state = Arc::new(Mutex::new(Buffer {
         epoch: Instant::now(),
+        paused_at: None,
         seconds,
         limit,
         bytes: 0,
@@ -598,6 +618,7 @@ mod tests {
         let new = Arc::new(fragment(1));
         let mut buffer = Buffer {
             epoch: Instant::now(),
+            paused_at: None,
             seconds: 10.0,
             limit: old.bytes(),
             bytes: old.bytes() + new.bytes(),

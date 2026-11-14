@@ -368,7 +368,7 @@ def capture_controls(library, *, background=False):
         if overlay is not None:
             stop_overlay()
         else:
-            launch_overlay(mode or "idle")
+            launch_overlay("paused" if capture and capture.paused else mode or "idle")
 
     def launch_overlay(overlay_mode, *, region_capture=None):
         nonlocal overlay, overlay_dismissed, overlay_region_capture, overlay_window
@@ -426,12 +426,15 @@ def capture_controls(library, *, background=False):
                 settings = screenshot_settings()
                 clipboard_owner = root.winfo_id()
                 submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
-        elif not busy and action in {b"toggle_record", b"toggle_replay", b"save_replay", b"save_short", b"save_long"}:
+        elif not busy and action in {b"toggle_record", b"toggle_replay", b"toggle_pause", b"save_replay", b"save_short", b"save_long"}:
             handle_hotkey(action.decode("ascii"), from_overlay=True)
 
     def handle_hotkey(action, *, from_overlay=False):
         if action == "toggle_overlay":
             toggle_overlay()
+        elif action == "toggle_pause":
+            if capture is not None and mode == "record":
+                submit("pause", capture.toggle_pause)
         elif action in {"screenshot", "screenshot_window", "screenshot_region"}:
             from .windows_screenshot import screenshot_settings, screenshot_source, take_screenshot
 
@@ -602,6 +605,8 @@ def capture_controls(library, *, background=False):
                 status.set(error)
                 if action == "stop":
                     closing = False
+            elif action == "pause":
+                status.set("Recording paused." if value else "Recording resumed.")
             elif action == "screenshot" and value is None:
                 status.set("Screenshot copied to the clipboard.")
             elif isinstance(value, (str, Path)):
@@ -626,7 +631,7 @@ def capture_controls(library, *, background=False):
                 pass
 
         now = time.monotonic()
-        if capture is not None and not busy and now >= next_inventory:
+        if capture is not None and not capture.paused and not busy and now >= next_inventory:
             next_inventory = now + 1
             inspect_audio = (capture.audio or capture.follow_application_audio) and now >= next_audio_inventory
             if inspect_audio:

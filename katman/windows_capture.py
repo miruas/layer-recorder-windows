@@ -281,6 +281,7 @@ class Capture:
         self.retry_at = {}
         self.warnings = deque(maxlen=20)
         self.final_project = None
+        self.paused = False
         self.duplication_failed = set()
         self.single_display = None
         if encoder == "h264_nvenc":
@@ -351,6 +352,8 @@ class Capture:
 
     def reconcile(self, current, current_audio=None):
         """Reconcile device generations on the capture-control worker."""
+        if self.paused:
+            return 0
         self._update_duplication_layout(current)
         desired = {display.key: display for display in current
                    if self.follow_displays or display.key in self.selected}
@@ -440,6 +443,25 @@ class Capture:
                 self._retire(key)
             except (OSError, RuntimeError) as error:
                 self.warnings.append(str(error))
+
+    def toggle_pause(self):
+        if not self.record_folder:
+            raise RuntimeError("No ordinary recording is active.")
+        if self.paused:
+            current = displays()
+            current_audio = None
+            if self.audio or self.follow_application_audio:
+                from .windows_audio import audio_sources
+                current_audio = audio_sources()
+            self.engine.request("resume_clock")
+            self.paused = False
+            self.retry_at.clear()
+            self.reconcile(current, current_audio)
+        else:
+            self.engine.request("pause_clock")
+            self.paused = True
+            self._stop_tracks()
+        return self.paused
 
     def stop(self):
         self._stop_tracks()
