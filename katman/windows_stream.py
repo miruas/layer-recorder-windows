@@ -151,9 +151,8 @@ def mix_audio(sources, output, stop):
             reader.join(timeout=2)
 
 
-def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode,
-                         *, audio=False):
-    if not audio and encoder == "h264_nvenc" and resolution is None and color_range != "pc" and (
+def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode):
+    if encoder == "h264_nvenc" and resolution is None and color_range != "pc" and (
             framerate_mode != "content" and not display.window and display.width % 2 == display.height % 2 == 0):
         try:
             monitor = next((monitor for monitor in displays() if display == monitor or (
@@ -187,16 +186,25 @@ class Livestream:
                  color_range=None, rate_control=None, framerate_mode=None):
         whip = isinstance(destination, WhipDestination)
         command = stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control,
-                                       framerate_mode, audio=bool(audio))
+                                       framerate_mode)
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
         if audio:
+            maps = ["-map", "0:v:0", "-map", "1:a:0"]
+            if "-filter_complex" in command:
+                graph = command.index("-filter_complex") + 1
+                command[graph] += ",setpts=PTS-STARTPTS[video]"
+                maps = ["-map", "[video]", "-map", "0:a:0"]
             index = command.index("-an")
             command[index:index + 1] = [
-                "-thread_queue_size", "64", "-f", "s16le", "-ar", str(AUDIO_TIMESCALE),
-                "-ac", str(CHANNELS), "-i", "pipe:0", "-map", "0:v:0", "-map", "1:a:0",
+                "-thread_queue_size", "64", "-analyzeduration", "1", "-probesize", "4096",
+                "-f", "s16le", "-ar", str(AUDIO_TIMESCALE),
+                "-ac", str(CHANNELS), "-i", "pipe:0", *maps,
                 "-c:a", "libopus" if whip else "aac", "-b:a", "160k", "-shortest",
             ]
+            if "-filter_complex" in command:
+                # FFmpeg's shortest-stream queue stalls this source-only video graph.
+                command.remove("-shortest")
             command.insert(1, "-nostdin")
         if whip:
             command.extend(["-f", "whip", "-handshake_timeout", "5000", "-timeout", "5s"])

@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from katman.common import load_project, probe
 from katman.export import export_project
@@ -15,10 +15,22 @@ from katman.windows_capture import (
     set_video_framerate_mode, video_framerate_mode,
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
-from katman.windows_stream import stream_video_command
+from katman.windows_stream import CustomDestination, Livestream, stream_video_command
 
 
 class ReplayTests(unittest.TestCase):
+    def test_dxgi_stream_maps_pcm_input_without_shortest_queue(self):
+        display = Display("DISPLAY1", 0, 0, 1920, 1080, True)
+        command = desktop_duplication_command(display, 30, display, (0, 0))
+        with (patch("katman.windows_stream.stream_video_command", return_value=command),
+              patch("katman.windows_stream.subprocess.Popen") as start,
+              patch("katman.windows_stream.threading.Thread", return_value=Mock())):
+            Livestream(display, 30, "h264_nvenc", CustomDestination("test.mp4", "mp4"), audio=[object()])
+        args = start.call_args.args[0]
+        self.assertIn("ddagrab=output_idx=0:framerate=30:output_fmt=bgra,setpts=PTS-STARTPTS[video]", args)
+        self.assertEqual([args[i + 1] for i, arg in enumerate(args) if arg == "-map"], ["[video]", "0:a:0"])
+        self.assertNotIn("-shortest", args)
+
     def test_video_only_nvenc_stream_probes_dxgi_before_publishing(self):
         display = Display("DISPLAY1", 0, 0, 1920, 1080, True)
         with (patch("katman.windows_stream.displays", return_value=[display]),
@@ -30,11 +42,6 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][-5:], ["-frames:v", "1", "-f", "null", "-"])
             run.side_effect = subprocess.TimeoutExpired("ffmpeg", 5)
             self.assertIn("gdigrab", stream_video_command(display, 60, "h264_nvenc", None, None, None, None, None))
-            run.reset_mock()
-            self.assertIn("gdigrab", stream_video_command(
-                display, 60, "h264_nvenc", None, None, None, None, None, audio=True,
-            ))
-            run.assert_not_called()
 
     def test_monitor_and_region_resolve_by_dxgi_device_name(self):
         primary = Display("DISPLAY1", 0, 0, 1920, 1080, True)
