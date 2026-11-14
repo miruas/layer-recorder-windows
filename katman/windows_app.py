@@ -277,9 +277,12 @@ def capture_controls(library, *, background=False):
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
         seconds = 300
+        configured_tracks = None
         if from_overlay:
             settings = gsr_settings(kind)
             record_options = settings.get("record_options")
+            if isinstance(record_options, dict) and "audio_track_item" in record_options:
+                configured_tracks = record_options["audio_track_item"]
             configured_rate = record_options.get("fps") if isinstance(record_options, dict) else None
             if type(configured_rate) is int and 1 <= configured_rate <= 500:
                 rate = configured_rate
@@ -288,14 +291,24 @@ def capture_controls(library, *, background=False):
                 if type(configured_seconds) is int and 1 <= configured_seconds <= 86400:
                     seconds = configured_seconds
         sources = [audio_options[index] for index in audio_select.curselection()]
+        follow_audio = follow_apps.get() if configured_tracks is None else False
+        if configured_tracks is not None:
+            from .windows_audio import gsr_audio_selection
+
+            try:
+                sources = gsr_audio_selection(configured_tracks, read_audio_inventory())
+            except (OSError, ValueError) as error:
+                status.set(str(error))
+                show()
+                return
         if any(source.kind == "system" for source in sources) and (
-                follow_apps.get() or any(source.kind == "application" for source in sources)):
+                follow_audio or any(source.kind == "application" for source in sources)):
             status.set("Choose the system mix or separate applications to avoid duplicating playback audio.")
             return
-        if follow_apps.get() and last_audio_inventory:
+        if follow_audio and last_audio_inventory:
             sources = list({source.key: source for source in
                             [*sources, *(item for item in last_audio_inventory if item.kind == "application")]}.values())
-        follow_screens, follow_audio = follow_displays.get(), follow_apps.get()
+        follow_screens = follow_displays.get()
         replay_save_lengths = {}
         if from_overlay and kind == "replay":
             for action, key in (("save_short", "short_save_duration"), ("save_long", "long_save_duration")):
@@ -336,10 +349,14 @@ def capture_controls(library, *, background=False):
         resources = APP / "overlay/resources"
         try:
             overlay_dismissed = False
+            from .windows_audio import gsr_audio_inventory
+
+            inventory = gsr_audio_inventory(last_audio_inventory or ())
             overlay = subprocess.Popen(
                 [str(executable), str(resources), overlay_mode],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory},
             )
         except OSError as error:
             status.set(f"Could not open the GSR overlay: {error}")

@@ -59,6 +59,13 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
 
     // Exercise the original settings constructors and save hooks with the
     // same platform adapters used by the running overlay.
+    _wputenv_s(L"LAYER_GSR_AUDIO_INVENTORY",
+        L"device:default_output\tDefault output\ndevice:mic\tMikrofon \u00c7\napp:game.exe\tGame");
+    const auto devices = gsr::get_audio_devices();
+    if (devices.size() != 2 || devices[1].description != "Mikrofon \xC3\x87" ||
+        gsr::get_application_audio() != std::vector<std::string>{"game.exe"})
+        return false;
+    info.system_info.supports_app_audio = true;
     gsr::PageStack stack;
     using Type = gsr::SettingsPage::Type;
     for (auto type : {Type::RECORD, Type::REPLAY, Type::STREAM}) {

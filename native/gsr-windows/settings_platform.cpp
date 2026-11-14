@@ -3,10 +3,45 @@
 #include "GsrInfo.hpp"
 #include "Utils.hpp"
 #include <filesystem>
+#include <cstdlib>
+#include <sstream>
+#include <algorithm>
 
 namespace gsr {
-std::vector<AudioDevice> get_audio_devices() { return {}; }
-std::vector<std::string> get_application_audio() { return {}; }
+static std::string audio_inventory() {
+    const auto *inventory = _wgetenv(L"LAYER_GSR_AUDIO_INVENTORY");
+    if (!inventory) return {};
+    const int length = WideCharToMultiByte(CP_UTF8, 0, inventory, -1, nullptr, 0, nullptr, nullptr);
+    if (length <= 1) return {};
+    std::string text(length, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, inventory, -1, text.data(), length, nullptr, nullptr);
+    text.pop_back();
+    return text;
+}
+
+std::vector<AudioDevice> get_audio_devices() {
+    std::vector<AudioDevice> devices;
+    std::istringstream rows(audio_inventory());
+    for (std::string row; std::getline(rows, row);) {
+        const auto split = row.find('\t');
+        if (split != std::string::npos && starts_with(row, "device:"))
+            devices.push_back({row.substr(7, split - 7), row.substr(split + 1)});
+    }
+    return devices;
+}
+
+std::vector<std::string> get_application_audio() {
+    std::vector<std::string> applications;
+    std::istringstream rows(audio_inventory());
+    for (std::string row; std::getline(rows, row);) {
+        const auto split = row.find('\t');
+        if (split == std::string::npos || !starts_with(row, "app:")) continue;
+        auto name = row.substr(4, split - 4);
+        if (std::find(applications.begin(), applications.end(), name) == applications.end())
+            applications.push_back(std::move(name));
+    }
+    return applications;
+}
 
 SupportedCaptureOptions get_supported_capture_options(const GsrInfo &) {
     SupportedCaptureOptions options;

@@ -25,6 +25,7 @@ class AudioSource:
     kind: str
     endpoint: str = ""
     pid: int = 0
+    default: bool = False
 
     @property
     def metadata(self):
@@ -248,11 +249,19 @@ def audio_sources():
     excluded = own_audio_processes()
     with com() as (ole, stack):
         devices = enumerator(ole, stack)
+        default_output = ""
+        try:
+            endpoint = object_result(stack, devices, 4, (c.c_int, c.c_int), (RENDER, 1),
+                                     "Find default Windows output")
+            default_output = device_id(ole, endpoint)
+        except OSError:
+            pass
         for flow, kind, label in [(RENDER, "system", "System audio"), (CAPTURE, "microphone", "Microphone")]:
             for endpoint in endpoints(stack, devices, flow):
                 identity = device_id(ole, endpoint)
                 name = device_name(ole, endpoint, label)
-                sources.append(AudioSource(f"{kind}:{identity}", f"{label} · {name}", kind, identity))
+                sources.append(AudioSource(f"{kind}:{identity}", f"{label} · {name}", kind, identity,
+                                           default=kind == "system" and identity == default_output))
                 if flow == RENDER and sys.getwindowsversion().build >= PROCESS_LOOPBACK_BUILD:
                     try:
                         with ExitStack() as current:
@@ -264,6 +273,44 @@ def audio_sources():
                         # A device can disappear while its session list is being read.
                         continue
     return sources + sorted(applications.values(), key=lambda source: source.name.casefold())
+
+
+def gsr_audio_id(source):
+    if source.kind == "system":
+        return f"device:{source.key}.monitor"
+    if source.kind == "application":
+        return f"app:{source.name.rsplit(' (PID ', 1)[0]}"
+    return f"device:{source.key}"
+
+
+def gsr_audio_inventory(sources):
+    rows = ["device:default_output\tDefault output"] if any(source.default for source in sources) else []
+    for source in sources:
+        label = " ".join(source.name.split())
+        rows.append(f"{gsr_audio_id(source)}\t{label}")
+    return "\n".join(rows)
+
+
+def gsr_audio_selection(tracks, sources):
+    if not isinstance(tracks, list):
+        raise ValueError("Invalid audio tracks in the GSR configuration.")
+    wanted = set()
+    for track in tracks:
+        if not isinstance(track, dict) or not isinstance(track.get("audio_inputs"), list):
+            raise ValueError("Invalid audio track in the GSR configuration.")
+        if track.get("application_audio_invert"):
+            raise ValueError("Inverted application audio is unavailable on Windows.")
+        wanted.update(item.casefold() for item in track.get("audio_inputs", []) if isinstance(item, str))
+    if "default_output" in wanted or "device:default_output" in wanted:
+        default = next((source for source in sources if source.default), None)
+        if default:
+            wanted.difference_update(("default_output", "device:default_output"))
+            wanted.add(gsr_audio_id(default).casefold())
+    selected = [source for source in sources if gsr_audio_id(source).casefold() in wanted]
+    missing = wanted.difference(gsr_audio_id(source).casefold() for source in selected)
+    if missing:
+        raise ValueError("Some audio sources selected in GSR are unavailable. Review the capture settings.")
+    return selected
 
 
 def process_audio_client(stack, pid):
