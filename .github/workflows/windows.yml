@@ -54,7 +54,16 @@ jobs:
         id: overlay-toolchain
       - name: Build and test the original GSR overlay
         run: |
-          ./tools/test-gsr-windows-widgets.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay
+          & {
+            ./tools/test-gsr-windows-widgets.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay
+          } *>&1 | Tee-Object -FilePath overlay-build.log
+      - name: Upload overlay build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-overlay-build-log
+          path: overlay-build.log
+          if-no-files-found: ignore
       - name: Verify overlay settings survive closing
         run: ./tools/test-gsr-windows-overlay.ps1 -OverlayDirectory build/native/windows-overlay-package/overlay -CloseSettings
       - name: Package the Windows build
