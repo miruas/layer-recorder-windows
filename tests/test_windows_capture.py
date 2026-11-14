@@ -12,13 +12,29 @@ from katman.common import load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
     Capture, Display, capture_binary, capture_command, desktop_duplication_command, gsr_h264_encoder,
-    set_video_framerate_mode, video_framerate_mode,
+    gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
 from katman.windows_stream import CustomDestination, Livestream, stream_video_command
 
 
 class ReplayTests(unittest.TestCase):
+    def test_hevc_requires_nvenc_and_a_compatible_container(self):
+        options = {"video_codec": "hevc"}
+        with patch("katman.windows_capture.nvenc_available", return_value=True) as available:
+            self.assertEqual(gsr_recording_encoder(options, "libx264", "mp4", "matroska"), "hevc_nvenc")
+            available.assert_called_once_with("hevc_nvenc")
+            with self.assertRaisesRegex(ValueError, "MP4, MKV or MOV"):
+                gsr_recording_encoder(options, "libx264", "mp4", "flv")
+            available.return_value = False
+            with self.assertRaisesRegex(RuntimeError, "HEVC NVENC"):
+                gsr_recording_encoder(options, "libx264", "mp4", "mov")
+        display = Display("Primary", 0, 0, 1920, 1080, True)
+        command = desktop_duplication_command(display, 60, encoder="hevc_nvenc")
+        set_video_rate_control(command, ("quality", 25))
+        self.assertEqual(command[command.index("-c:v") + 1], "hevc_nvenc")
+        self.assertEqual(command[command.index("-cq") + 1], "25")
+
     def test_dxgi_stream_maps_pcm_input_without_shortest_queue(self):
         display = Display("DISPLAY1", 0, 0, 1920, 1080, True)
         command = desktop_duplication_command(display, 30, display, (0, 0))

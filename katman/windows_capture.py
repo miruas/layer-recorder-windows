@@ -148,17 +148,31 @@ def gsr_h264_encoder(options, selected):
         return "libx264"
     if selected != "libx264" or codec not in ("auto", "h264"):
         return selected
+    return "h264_nvenc" if nvenc_available("h264_nvenc") else selected
+
+
+def nvenc_available(encoder):
     try:
         result = subprocess.run(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
              "-f", "lavfi", "-i", "color=c=black:s=640x360:r=60",
-             "-frames:v", "1", "-c:v", "h264_nvenc", "-preset", "p3", "-f", "null", "-"],
+             "-frames:v", "1", "-c:v", encoder, "-preset", "p3", "-f", "null", "-"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.TimeoutExpired):
-        return selected
-    return "h264_nvenc" if result.returncode == 0 else selected
+        return False
+    return result.returncode == 0
+
+
+def gsr_recording_encoder(options, selected, container, replay_container):
+    if isinstance(options, dict) and options.get("video_codec") == "hevc":
+        if "flv" in (container, replay_container):
+            raise ValueError("Use MP4, MKV or MOV for HEVC recording and replay.")
+        if not nvenc_available("hevc_nvenc"):
+            raise RuntimeError("HEVC NVENC could not start on this device.")
+        return "hevc_nvenc"
+    return gsr_h264_encoder(options, selected)
 
 
 def window_source(handle):
@@ -191,6 +205,7 @@ def capture_command(display, fps, encoder):
     quality = {
         "libx264": ["-preset", "ultrafast", "-tune", "zerolatency", "-crf", "21"],
         "h264_nvenc": ["-preset", "p3", "-rc", "vbr", "-cq", "21", "-b:v", "0"],
+        "hevc_nvenc": ["-preset", "p3", "-rc", "vbr", "-cq", "23", "-b:v", "0"],
         "h264_amf": ["-quality", "speed", "-b:v", "12M"],
         "h264_qsv": ["-preset", "veryfast", "-global_quality", "21"],
     }
@@ -202,8 +217,8 @@ def capture_command(display, fps, encoder):
             "empty_moov+default_base_moof+frag_keyframe+skip_trailer", "-f", "mp4", "pipe:1"]
 
 
-def desktop_duplication_command(display, fps, monitor=None, target=None):
-    command = capture_command(display, fps, "h264_nvenc")
+def desktop_duplication_command(display, fps, monitor=None, target=None, *, encoder="h264_nvenc"):
+    command = capture_command(display, fps, encoder)
     # Pass D3D11 surfaces directly to NVENC. CFR normalizes DXGI timestamps
     # to one frame per output tick before the fragmented MP4 muxer.
     output = target[1] if target is not None else 0
@@ -323,6 +338,7 @@ def set_video_rate_control(command, settings):
         controls = {
             "libx264": ["-x264-params", "nal-hrd=cbr"],
             "h264_nvenc": ["-rc", "cbr"],
+            "hevc_nvenc": ["-rc", "cbr"],
             "h264_amf": ["-rc", "cbr"],
             "h264_qsv": [],
         }
@@ -333,7 +349,7 @@ def set_video_rate_control(command, settings):
         index = command.index("-b:v", codec_pos)
         command[index:index + 2] = ["-rc", "cqp", "-qp_i", str(value), "-qp_p", str(value)]
     else:
-        flag = {"libx264": "-crf", "h264_nvenc": "-cq", "h264_qsv": "-global_quality"}[encoder]
+        flag = {"libx264": "-crf", "h264_nvenc": "-cq", "hevc_nvenc": "-cq", "h264_qsv": "-global_quality"}[encoder]
         command[command.index(flag, codec_pos) + 1] = str(value)
 
 
@@ -513,7 +529,7 @@ class Capture:
         self.duplication_failed = set()
         self.duplication_layout = ()
         self.duplication_targets = {}
-        if encoder == "h264_nvenc":
+        if encoder in ("h264_nvenc", "hevc_nvenc"):
             try:
                 self._update_duplication_layout(displays())
             except OSError:
@@ -533,14 +549,14 @@ class Capture:
             raise
 
     def _update_duplication_layout(self, current):
-        if self.encoder != "h264_nvenc" or tuple(current) == self.duplication_layout:
+        if self.encoder not in ("h264_nvenc", "hevc_nvenc") or tuple(current) == self.duplication_layout:
             return
         self.duplication_layout = tuple(current)
         self.duplication_targets = dxgi_targets() if current else {}
         self.duplication_failed.clear()
 
     def _duplication_target(self, source):
-        if (self.encoder != "h264_nvenc" or self.resolution is not None or self.color_range == "pc" or
+        if (self.encoder not in ("h264_nvenc", "hevc_nvenc") or self.resolution is not None or self.color_range == "pc" or
                 self.framerate_mode == "content" or source.key in self.duplication_failed or
                 source.width % 2 or source.height % 2):
             return None
@@ -559,7 +575,7 @@ class Capture:
         if isinstance(source, Display):
             target = self._duplication_target(source)
             backend = "ddagrab" if target else "gdigrab"
-            command = (desktop_duplication_command(source, self.fps, *target) if target
+            command = (desktop_duplication_command(source, self.fps, *target, encoder=self.encoder) if target
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             set_capture_cursor(command, self.cursor)
             set_video_rate_control(command, self.rate_control)

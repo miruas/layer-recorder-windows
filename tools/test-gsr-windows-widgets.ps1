@@ -27,6 +27,7 @@ $settingsPage = Join-Path $build 'settings_page_generated.cpp'
 $settingsCode = Get-Content -LiteralPath "$source/src/gui/SettingsPage.cpp" -Raw
 $settingsCode = $settingsCode.Replace('../../include/', '')
 $settingsCode = $settingsCode.Replace('Sync to content (Only X11 or desktop portal capture)', 'Sync to content')
+$settingsCode = $settingsCode.Replace('if(gsr_info->supported_video_codecs.hevc)', 'if(type != Type::STREAM && gsr_info->supported_video_codecs.hevc)')
 Set-Content -LiteralPath $settingsPage -Value $settingsCode -Encoding utf8
 $includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port", "-I$build")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }

@@ -18,7 +18,7 @@ from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
     ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
-    video_framerate_mode, video_resolution, window_source,
+    gsr_recording_encoder, nvenc_available, video_framerate_mode, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -418,7 +418,8 @@ def capture_controls(library, *, background=False):
         replay_save_lengths = save_lengths
         status.set("Starting capture…")
         submit(kind, lambda: Capture(recording_directory, selected, rate,
-                                     gsr_h264_encoder(record_options, codec) if use_gsr else codec,
+                                     gsr_recording_encoder(record_options, codec, container, replay_container)
+                                     if use_gsr else codec,
                                      seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
                                      follow_application_audio=follow_audio, fixed_region=region,
@@ -505,7 +506,8 @@ def capture_controls(library, *, background=False):
                 [str(executable), str(resources), overlay_mode],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory},
+                env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory,
+                     "LAYER_GSR_HEVC_NVENC": str(int(hevc_available))},
             )
             overlay_action = b""
             overlay_messages = queue.SimpleQueue()
@@ -846,6 +848,14 @@ def capture_controls(library, *, background=False):
     apply_hotkeys()
     update_buttons()
     root.after(150, poll)
+    hevc_available = False
+
+    def detect_hevc():
+        nonlocal hevc_available
+        hevc_available = nvenc_available("hevc_nvenc")
+
+    threading.Thread(target=detect_hevc, daemon=True).start()
+
     def check_replay_startup():
         nonlocal last_startup_power, last_startup_game, startup_replay
         settings = gsr_settings("replay")
