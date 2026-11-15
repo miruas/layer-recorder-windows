@@ -152,7 +152,7 @@ def mix_audio(sources, output, stop):
 
 
 def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode):
-    if encoder == "h264_nvenc" and resolution is None and color_range != "pc" and (
+    if encoder == "h264_nvenc" and resolution is None and color_range != "tv" and (
             framerate_mode != "content" and not display.window and display.width % 2 == display.height % 2 == 0):
         try:
             monitor = next((monitor for monitor in displays() if display == monitor or (

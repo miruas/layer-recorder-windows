@@ -599,7 +599,9 @@ class Capture:
         self.duplication_failed.clear()
 
     def _duplication_target(self, source):
-        if (self.encoder not in NVENC_ENCODERS or self.resolution is not None or self.color_range == "pc" or
+        # Direct RGB surfaces are encoded full-range by NVENC. Limited range
+        # needs the explicit color conversion in the GDI pipeline.
+        if (self.encoder not in NVENC_ENCODERS or self.resolution is not None or self.color_range == "tv" or
                 self.framerate_mode == "content" or source.key in self.duplication_failed or
                 source.width % 2 or source.height % 2):
             return None

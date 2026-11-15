@@ -164,6 +164,10 @@ class ReplayTests(unittest.TestCase):
                 "ddagrab=output_idx=2:framerate=60:output_fmt=bgra:video_size=640x360:offset_x=64:offset_y=40",
                 command,
             )
+            capture.color_range = "pc"
+            self.assertEqual(capture._duplication_target(region), (secondary, (1, 2)))
+            capture.color_range = "tv"
+            self.assertIsNone(capture._duplication_target(region))
 
     def test_desktop_duplication_crop_uses_monitor_relative_offsets(self):
         monitor = Display("Monitor", -1920, -120, 1920, 1080, True)
