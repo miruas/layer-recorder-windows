@@ -82,6 +82,18 @@ def terminate_overlay(process):
             pass
 
 
+def post_overlay_capture_state(window, state):
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    register = user32.RegisterWindowMessageW
+    register.argtypes = [wintypes.LPCWSTR]
+    register.restype = wintypes.UINT
+    post = user32.PostMessageW
+    post.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    post.restype = wintypes.BOOL
+    message = register("Layer.Overlay.CaptureState.v1")
+    return bool(message and post(window, message, state, 0))
+
+
 def editor_command(project=None, library=None):
     editor = APP / "bin/layer-studio.exe"
     if not editor.is_file():
@@ -183,6 +195,8 @@ def capture_controls(library, *, background=False):
     replay_save_lengths = {}
     mode = None
     overlay = None
+    overlay_handle = None
+    overlay_state_sent = None
     overlay_messages = None
     overlay_action = b""
     pending_screenshot = None
@@ -574,6 +588,7 @@ def capture_controls(library, *, background=False):
     def launch_overlay(overlay_mode, *, region_capture=None):
         nonlocal overlay, overlay_dismissed, overlay_region_capture, overlay_window
         nonlocal overlay_messages, overlay_action
+        nonlocal overlay_handle, overlay_state_sent
         if overlay is not None:
             return
         executable = APP / "overlay/layer-gsr-overlay.exe"
@@ -582,6 +597,7 @@ def capture_controls(library, *, background=False):
             overlay_dismissed = False
             overlay_region_capture = region_capture
             overlay_window = foreground_window()
+            overlay_handle = overlay_state_sent = None
             from .windows_audio import gsr_audio_inventory
 
             inventory = gsr_audio_inventory(last_audio_inventory or ())
@@ -591,6 +607,7 @@ def capture_controls(library, *, background=False):
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory, "LAYER_GSR_CAMERA_INVENTORY": cameras,
+                     "LAYER_GSR_STATE_MESSAGES": "1",
                      **{f"LAYER_GSR_{codec.upper()}_NVENC": str(int(available))
                         for codec, available in nvenc_recording_support.items()}},
             )
@@ -612,18 +629,27 @@ def capture_controls(library, *, background=False):
 
     def poll_overlay():
         nonlocal overlay, overlay_action, overlay_hotkeys_suspended, pending_screenshot
+        nonlocal overlay_handle, overlay_state_sent
         if overlay is None:
             return
         while True:
             try:
                 message = overlay_messages.get_nowait()
             except queue.Empty:
+                state = ((1 if mode == "record" else 0) | (2 if capture is not None else 0)
+                         | (4 if capture and capture.paused else 0) | (8 if stream is not None else 0))
+                if overlay_handle and state != overlay_state_sent and post_overlay_capture_state(overlay_handle, state):
+                    overlay_state_sent = state
                 return
             if message is None:
                 break
             if message in (b"suspend_hotkeys", b"resume_hotkeys"):
                 overlay_hotkeys_suspended = message == b"suspend_hotkeys"
                 apply_hotkeys()
+            elif message.startswith(b"overlay_ready "):
+                handle = message.removeprefix(b"overlay_ready ")
+                if handle.isdigit() and len(handle) <= 20:
+                    overlay_handle = int(handle)
             else:
                 overlay_action = message
         finished, overlay = overlay, None

@@ -66,6 +66,10 @@ and Escape dismissal on the interactive Windows desktop. Build with
 to stage the resources and runtime dependencies for the Windows packages.
 The Layer tray and Alt+Z launch that overlay. Record, Replay, Replay Save
 and Recordings dispatch to the existing Windows capture controller and Studio.
+The controller sends capture-state changes to the open overlay using a
+registered Win32 window message. The overlay updates its cards and redraws
+without polling. The native live-state test enables Replay Save after opening
+an idle overlay.
 The main gear opens the Windows controls. The screenshot gear opens the
 original GSR screenshot settings and saves them to the GSR configuration.
 The Windows directory picker backend preserves Unicode paths. With global

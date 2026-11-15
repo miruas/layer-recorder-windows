@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <windows.h>
+#include <commctrl.h>
 #include <GL/gl.h>
 #include <algorithm>
 #include <chrono>
@@ -17,6 +18,25 @@
 #include <string_view>
 
 namespace {
+struct CaptureStateMessage {
+    UINT message;
+    WPARAM flags;
+    bool changed = false;
+};
+
+LRESULT CALLBACK capture_state_subclass(HWND hwnd, UINT message, WPARAM flags, LPARAM parameter,
+                                        UINT_PTR id, DWORD_PTR data) {
+    auto &state = *reinterpret_cast<CaptureStateMessage *>(data);
+    if (message == state.message) {
+        state.changed |= state.flags != (flags & 15);
+        state.flags = flags & 15;
+        return 1;
+    }
+    if (message == WM_NCDESTROY)
+        RemoveWindowSubclass(hwnd, capture_state_subclass, id);
+    return DefSubclassProc(hwnd, message, flags, parameter);
+}
+
 class DesktopComposition {
 public:
     ~DesktopComposition() {
@@ -236,7 +256,20 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
         const auto capture = mode.substr(0, separator);
         const bool streaming = separator != mode.npos && mode.substr(separator + 1) == L"stream";
         const bool recording = capture == L"record" || capture == L"paused";
-        page.set_capture_state(recording, recording || capture == L"replay", capture == L"paused", streaming);
+        CaptureStateMessage state{RegisterWindowMessageW(L"Layer.Overlay.CaptureState.v1"),
+            WPARAM((recording ? 1 : 0) | (recording || capture == L"replay" ? 2 : 0)
+                   | (capture == L"paused" ? 4 : 0) | (streaming ? 8 : 0))};
+        const auto update_cards = [&] {
+            page.set_capture_state(state.flags & 1, state.flags & 2, state.flags & 4, state.flags & 8);
+            state.changed = false;
+        };
+        update_cards();
+        const bool live_state = std::getenv("LAYER_GSR_STATE_MESSAGES") && state.message &&
+            SetWindowSubclass(hwnd, capture_state_subclass, 1, reinterpret_cast<DWORD_PTR>(&state));
+        if (live_state) {
+            std::printf("overlay_ready %llu\n", static_cast<unsigned long long>(reinterpret_cast<UINT_PTR>(hwnd)));
+            std::fflush(stdout);
+        }
         mgl::Sprite desktop(&backdrop);
         auto draw = [&] {
             window.clear(live ? mgl::Color(0, 0, 0, 0) : mgl::Color(0, 0, 0, 255));
@@ -266,9 +299,14 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
                     open = open && page_open;
                 }
                 if (open) {
+                    if (state.changed) update_cards();
                     draw();
                     animate_until = Clock::now() + std::chrono::milliseconds(650);
                 }
+            }
+            if (open && state.changed) {
+                update_cards();
+                draw();
             }
             if (open && window.is_open()) {
                 const bool animating = Clock::now() < animate_until;
@@ -277,6 +315,7 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
                 if (result == WAIT_TIMEOUT) draw();
             }
         }
+        if (live_state) RemoveWindowSubclass(hwnd, capture_state_subclass, 1);
         while (page.back()) {}
         window.set_visible(false);
     }

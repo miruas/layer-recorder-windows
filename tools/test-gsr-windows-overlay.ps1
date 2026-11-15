@@ -4,6 +4,7 @@ param(
     [switch]$SelectRecordings,
     [switch]$SelectRegion,
     [switch]$CloseSettings,
+    [switch]$LiveCaptureState,
     [switch]$SoftwareOpenGL
 )
 $ErrorActionPreference = 'Stop'
@@ -25,6 +26,9 @@ public static class GsrOverlayTest {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message,
+        IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);
     private delegate bool EnumCallback(IntPtr window, IntPtr param);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumCallback callback, IntPtr param);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
@@ -63,6 +67,7 @@ $launch.ArgumentList.Add($source)
 if ($SelectRegion) { $launch.ArgumentList.Add('region') }
 $launch.UseShellExecute = $false
 $launch.RedirectStandardOutput = $true
+if ($LiveCaptureState) { $launch.Environment['LAYER_GSR_STATE_MESSAGES'] = '1' }
 $configDirectory = $null
 if ($CloseSettings) {
     $configDirectory = [IO.Directory]::CreateTempSubdirectory('layer-overlay-')
@@ -91,7 +96,25 @@ try {
         $bounds.Right -ne $info.Bounds.Right -or $bounds.Bottom -ne $info.Bounds.Bottom) {
         throw 'The overlay did not cover the cursor monitor.'
     }
-    if ($CloseSettings) {
+    if ($LiveCaptureState) {
+        $message = [GsrOverlayTest]::RegisterWindowMessage('Layer.Overlay.CaptureState.v1')
+        $ack = [IntPtr]::Zero
+        if ([GsrOverlayTest]::SendMessageTimeout($window, $message, [IntPtr]2, [IntPtr]0, 2, 3000,
+                                              [ref]$ack) -eq [IntPtr]::Zero -or $ack -ne [IntPtr]1) {
+            throw 'The native overlay did not receive a live replay state.'
+        }
+        Start-Sleep -Milliseconds 100
+        $height = $bounds.Bottom - $bounds.Top
+        $card = [int][Math]::Floor($height / 5)
+        $x = [int](($bounds.Right - $bounds.Left) / 2 - 1.5 * $card)
+        $row = [Math]::Max(13, .015 * $height) * .8 + 2 * [Math]::Floor(.00694 * $height)
+        foreach ($y in @([int]($height / 4), [int]($height / 4 + $card / 2 + 1.4 * $row))) {
+            $point = [IntPtr](($y -shl 16) -bor $x)
+            [void][GsrOverlayTest]::PostMessage($window, 0x200, [IntPtr]0, $point)
+            [void][GsrOverlayTest]::PostMessage($window, 0x201, [IntPtr]1, $point)
+            [void][GsrOverlayTest]::PostMessage($window, 0x202, [IntPtr]0, $point)
+        }
+    } elseif ($CloseSettings) {
         $height = $bounds.Bottom - $bounds.Top
         $card = [int][Math]::Floor($height / 5)
         $side = [int][Math]::Floor($card * .33)
@@ -129,7 +152,12 @@ try {
     }
     if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'The overlay did not close cleanly.' }
     $action = $process.StandardOutput.ReadToEnd().Trim()
-    if ($CloseSettings) {
+    if ($LiveCaptureState) {
+        if ($action -notmatch '\Aoverlay_ready [0-9]+\r?\nsave_replay\z') {
+            throw "Live replay state did not enable the Save action: '$action'."
+        }
+        Write-Host 'The open overlay enabled Replay Save after a live state update.'
+    } elseif ($CloseSettings) {
         $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
         if (!$config.main -or $action -ne 'resume_hotkeys') { throw 'Closing settings did not save the GSR configuration.' }
         Write-Host 'The overlay saved its settings before closing.'

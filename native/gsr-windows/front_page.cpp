@@ -64,10 +64,12 @@ void WindowsFrontPage::set_capture_state(bool recording, bool replay, bool pause
     record_dropdown_button_ptr->set_item_label("pause", paused ? TR("Unpause") : TR("Pause"));
     record_dropdown_button_ptr->set_item_icon("pause", paused ? &theme.play_texture : &theme.pause_texture);
     record_dropdown_button_ptr->set_activated(recording);
+    record_dropdown_button_ptr->set_item_enabled("start", recording || !replay);
     record_dropdown_button_ptr->set_item_label("start", recording ? TR("Stop and save") : TR("Start"));
     record_dropdown_button_ptr->set_item_icon("start", recording ? &theme.stop_texture : &theme.play_texture);
     replay_dropdown_button_ptr->set_description(replay ? TR("On") : TR("Off"));
     replay_dropdown_button_ptr->set_activated(replay);
+    replay_dropdown_button_ptr->set_item_enabled("start", !recording);
     replay_dropdown_button_ptr->set_item_label("start", replay ? TR("Turn off") : TR("Turn on"));
     replay_dropdown_button_ptr->set_item_icon("start", replay ? &theme.stop_texture : &theme.play_texture);
     for (const auto *id : {"save", "save_1_min", "save_10_min"})

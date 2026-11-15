@@ -70,6 +70,8 @@ jobs:
           if-no-files-found: ignore
       - name: Verify overlay settings survive closing
         run: ./tools/test-gsr-windows-overlay.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay -CloseSettings -SoftwareOpenGL
+      - name: Verify the open overlay updates capture state
+        run: ./tools/test-gsr-windows-overlay.ps1 -Toolchain "${{ steps.overlay-toolchain.outputs.msys2-location }}/ucrt64/bin" -OverlayDirectory build/native/windows-overlay-package/overlay -LiveCaptureState -SoftwareOpenGL
       - name: Package the Windows build
         if: github.event_name == 'push'
         run: ./tools/package-windows.ps1 -Output .
