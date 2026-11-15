@@ -36,7 +36,21 @@ foreach ($device in 'device_name', 'audio_input') {
     $settingsCode = $settingsCode.Replace($selection,
         "audio_device_box->add_item(TR(`"Disconnected audio device`"), $device, false);`n                    $selection")
 }
-Set-Content -LiteralPath $settingsPage -Value $settingsCode -Encoding utf8
+$screenshotSettingsPage = Join-Path $build 'screenshot_settings_page_generated.cpp'
+$screenshotSettingsCode = (Get-Content -LiteralPath "$source/src/gui/ScreenshotSettingsPage.cpp" -Raw).Replace('../../include/', '')
+foreach ($page in @(
+    @{ Path = $settingsPage; Code = $settingsCode; Target = 'record_options.record_area_option' }
+    @{ Path = $screenshotSettingsPage; Code = $screenshotSettingsCode; Target = 'config.screenshot_config.record_area_option' }
+)) {
+    $target = $page.Target
+    $selection = "record_area_box_ptr->set_selected_item($target);"
+    $replacement = @"
+if(starts_with($target, R"(\\.\)"))
+            record_area_box_ptr->add_item(TR("Disconnected monitor"), $target, false);
+        $selection
+"@
+    Set-Content -LiteralPath $page.Path -Value ($page.Code.Replace($selection, $replacement)) -Encoding utf8
+}
 $includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port", "-I$build")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }
 if ($LASTEXITCODE -ne 0) { throw 'Pango and GIO headers are required.' }
@@ -47,9 +61,10 @@ $cSources = @("$port/mgl_win32.c", "$port/mgl_files_win32.c", "$build/window_api
 $cSources += (Get-ChildItem "$mgl/src/graphics" -Filter '*.c').FullName
 $cppSources = @("$port/config.cpp", "$build/key_names.cpp",
     "$source/src/Config.cpp", "$source/src/Theme.cpp", "$source/src/Translation.cpp",
-    "$port/front_page.cpp", "$port/settings_platform.cpp", $frontPage, $fileChooser, $settingsPage, "$build/global_settings_generated.cpp")
+    "$port/front_page.cpp", "$port/settings_platform.cpp", $frontPage, $fileChooser, $settingsPage,
+    $screenshotSettingsPage, "$build/global_settings_generated.cpp")
 $cppSources += @('Widget', 'Tooltip', 'DropdownButton', 'Utils', 'Page', 'PageStack', 'StaticPage',
-    'List', 'CustomRendererWidget', 'Label', 'Image', 'Button', 'ScreenshotSettingsPage',
+    'List', 'CustomRendererWidget', 'Label', 'Image', 'Button',
     'GsrPage', 'ScrollablePage', 'Subsection', 'RadioButton', 'LineSeparator', 'ComboBox', 'CheckBox',
     'Entry') | ForEach-Object { "$source/src/gui/$_.cpp" }
 $cppSources += (Get-ChildItem "$pp/src" -Recurse -Filter '*.cpp' |
