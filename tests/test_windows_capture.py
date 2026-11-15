@@ -14,12 +14,21 @@ from katman.windows_capture import (
     Capture, Display, capture_binary, capture_command, desktop_duplication_command, dxgi_targets, gsr_h264_encoder,
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
-from katman.windows_audio import AudioSource, audio_encoder_command
+from katman.windows_audio import AudioSource, audio_encoder_command, gsr_audio_selection
 from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
 from katman.windows_screenshot import capture_monitor, screenshot_source
 
 
 class ReplayTests(unittest.TestCase):
+    def test_gsr_custom_audio_name_preserves_source_identity(self):
+        speaker = AudioSource("system:speaker", "Speakers", "system", default=True)
+        selected = gsr_audio_selection(
+            [{"audio_inputs": ["device:default_output"], "name": "Masaüstü sesi"}], [speaker],
+        )[0]
+        self.assertEqual(selected.key, speaker.key)
+        self.assertEqual(selected.name, speaker.name)
+        self.assertEqual(selected.metadata["name"], "Masaüstü sesi")
+
     def test_saved_windows_monitor_id_survives_display_number_changes(self):
         identity = r"\\?\DISPLAY#MONITOR_A#instance"
         replacement = Display("DISPLAY1", 0, 0, 1920, 1080, True, r"\\?\DISPLAY#MONITOR_B#instance")
@@ -36,7 +45,7 @@ class ReplayTests(unittest.TestCase):
         first = AudioSource("app:123", "game.exe (PID 123)", "application", pid=123)
         restarted = AudioSource("app:456", "game.exe (PID 456)", "application", pid=456)
         other = AudioSource("app:789", "other.exe (PID 789)", "application", pid=789)
-        tracks = [{"audio_inputs": ["app:game.exe"]}]
+        tracks = [{"audio_inputs": ["app:game.exe"], "name": "Game audio"}]
         with (tempfile.TemporaryDirectory() as folder,
               patch("katman.windows_capture.shutil.which", return_value="ffmpeg"),
               patch("katman.windows_capture.CaptureEngine") as engine):
@@ -49,7 +58,8 @@ class ReplayTests(unittest.TestCase):
                 self.assertEqual(set(capture.active), {display.key, first.key})
                 capture.reconcile([display], [restarted, other])
                 self.assertEqual(set(capture.active), {display.key, restarted.key})
-                self.assertTrue(next(track for track in capture.tracks if track.source == first).stopped)
+                self.assertTrue(next(track for track in capture.tracks if track.source.key == first.key).stopped)
+                self.assertEqual(capture.active[restarted.key].source.metadata["name"], "Game audio")
             finally:
                 capture.stop()
 

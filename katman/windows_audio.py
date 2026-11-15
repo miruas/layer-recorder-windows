@@ -3,7 +3,7 @@
 from contextlib import ExitStack, contextmanager
 import ctypes as c
 from ctypes import wintypes as w
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import os
 import subprocess
@@ -26,10 +26,11 @@ class AudioSource:
     endpoint: str = ""
     pid: int = 0
     default: bool = False
+    track_name: str = ""
 
     @property
     def metadata(self):
-        return dict(type="audio", kind=self.kind, name=self.name, backend="wasapi")
+        return dict(type="audio", kind=self.kind, name=self.track_name or self.name, backend="wasapi")
 
 
 class GUID(c.Structure):
@@ -294,20 +295,28 @@ def gsr_audio_inventory(sources):
 def gsr_audio_selection(tracks, sources, *, allow_missing=False):
     if not isinstance(tracks, list):
         raise ValueError("Invalid audio tracks in the GSR configuration.")
-    wanted = set()
+    wanted = {}
     for track in tracks:
         if not isinstance(track, dict) or not isinstance(track.get("audio_inputs"), list):
             raise ValueError("Invalid audio track in the GSR configuration.")
         if track.get("application_audio_invert"):
             raise ValueError("Inverted application audio is unavailable on Windows.")
-        wanted.update(item.casefold() for item in track.get("audio_inputs", []) if isinstance(item, str))
+        name = track.get("name")
+        name = name.strip() if isinstance(name, str) else ""
+        for item in track["audio_inputs"]:
+            if isinstance(item, str):
+                identity = item.casefold()
+                wanted[identity] = wanted.get(identity) or name
     if "default_output" in wanted or "device:default_output" in wanted:
         default = next((source for source in sources if source.default), None)
         if default:
-            wanted.difference_update(("default_output", "device:default_output"))
-            wanted.add(gsr_audio_id(default).casefold())
-    selected = [source for source in sources if gsr_audio_id(source).casefold() in wanted]
-    missing = wanted.difference(gsr_audio_id(source).casefold() for source in selected)
+            name = wanted.pop("default_output", "")
+            alias_name = wanted.pop("device:default_output", "")
+            identity = gsr_audio_id(default).casefold()
+            wanted[identity] = wanted.get(identity) or name or alias_name
+    selected = [replace(source, track_name=wanted[identity]) for source in sources
+                if (identity := gsr_audio_id(source).casefold()) in wanted]
+    missing = wanted.keys() - {gsr_audio_id(source).casefold() for source in selected}
     if missing and not allow_missing:
         raise ValueError("Some audio sources selected in GSR are unavailable. Review the capture settings.")
     return selected
