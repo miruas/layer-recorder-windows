@@ -20,6 +20,7 @@ TIMESCALE = 90_000
 RECORDING_CONTAINERS = {"mp4": ".mp4", "matroska": ".mkv", "mov": ".mov", "flv": ".flv"}
 GSR_NVENC_RECORDING_CODECS = {"hevc": "hevc_nvenc", "av1": "av1_nvenc"}
 NVENC_ENCODERS = {"h264_nvenc", *GSR_NVENC_RECORDING_CODECS.values()}
+GSR_H264_CODECS = (None, "", "auto", "h264", "h264_software")
 
 
 def recording_container(settings):
@@ -158,7 +159,9 @@ def gsr_h264_encoder(options, selected):
     codec = options.get("video_codec", "auto") if isinstance(options, dict) else "auto"
     if codec == "h264_software":
         return "libx264"
-    if selected != "libx264" or codec not in ("auto", "h264"):
+    if codec not in GSR_H264_CODECS:
+        raise ValueError("Windows livestreaming supports Auto, H.264 and H.264 Software. Select one in GSR.")
+    if selected != "libx264":
         return selected
     return "h264_nvenc" if nvenc_available("h264_nvenc") else selected
 
@@ -196,6 +199,8 @@ def gsr_recording_encoder(options, selected, container, replay_container):
         if not (nvenc_available(encoder, ten_bit=True) if ten_bit else nvenc_available(encoder)):
             raise RuntimeError(f"{codec.upper()} NVENC could not start on this device.")
         return encoder
+    if codec not in GSR_H264_CODECS:
+        raise ValueError("The configured video codec is unavailable on Windows. Select a supported codec in GSR.")
     return gsr_h264_encoder(options, selected)
 
 

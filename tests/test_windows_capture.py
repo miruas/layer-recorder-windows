@@ -20,6 +20,14 @@ from katman.windows_screenshot import capture_monitor, screenshot_source
 
 
 class ReplayTests(unittest.TestCase):
+    def test_gsr_unsupported_codec_does_not_silently_encode_h264(self):
+        with patch("katman.windows_capture.nvenc_available") as available:
+            with self.assertRaisesRegex(ValueError, "configured video codec is unavailable"):
+                gsr_recording_encoder({"video_codec": "hevc_hdr"}, "libx264", "mp4", "mp4")
+            with self.assertRaisesRegex(ValueError, "Windows livestreaming"):
+                gsr_h264_encoder({"video_codec": "av1"}, "h264_nvenc")
+            available.assert_not_called()
+
     def test_gsr_custom_audio_name_preserves_source_identity(self):
         speaker = AudioSource("system:speaker", "Speakers", "system", default=True)
         selected = gsr_audio_selection(

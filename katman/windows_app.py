@@ -802,6 +802,8 @@ def capture_controls(library, *, background=False):
                         audio_message.set(capture.warnings[-1])
             elif error:
                 status.set(error)
+                if action in {"record", "replay", "stream_start"}:
+                    show()
                 if action == "stop":
                     closing = False
             elif action == "pause":
