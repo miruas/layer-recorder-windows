@@ -570,6 +570,7 @@ fn run() -> Result<()> {
 
 #[cfg(windows)]
 fn dxgi_outputs() -> Result<()> {
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_MODE_ROTATION_IDENTITY;
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, DXGI_ERROR_NOT_FOUND, IDXGIFactory1};
 
     let factory: IDXGIFactory1 = unsafe { CreateDXGIFactory1()? };
@@ -594,6 +595,7 @@ fn dxgi_outputs() -> Result<()> {
                     "name": name.trim_end_matches('\0'),
                     "adapter": adapter_index,
                     "output": output_index,
+                    "rotated": desc.Rotation != DXGI_MODE_ROTATION_IDENTITY,
                 }));
             }
         }

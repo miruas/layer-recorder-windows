@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from katman.common import load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
-    Capture, Display, capture_binary, capture_command, desktop_duplication_command, gsr_h264_encoder,
+    Capture, Display, capture_binary, capture_command, desktop_duplication_command, dxgi_targets, gsr_h264_encoder,
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
@@ -19,6 +19,15 @@ from katman.windows_stream import CustomDestination, Livestream, stream_video_co
 
 
 class ReplayTests(unittest.TestCase):
+    def test_rotated_outputs_are_not_used_for_desktop_duplication(self):
+        with patch("katman.windows_capture.subprocess.run") as run:
+            run.return_value.stdout = b"""[
+                {"name":"DISPLAY1","adapter":0,"output":0,"rotated":false},
+                {"name":"DISPLAY2","adapter":0,"output":1,"rotated":true},
+                {"name":"DISPLAY3","adapter":1,"output":0}
+            ]"""
+            self.assertEqual(dxgi_targets(), {"display1": (0, 0)})
+
     def test_10_bit_desktop_duplication_requires_10_bit_surfaces(self):
         display = Display("Primary", 0, 0, 1920, 1080, True)
         command = desktop_duplication_command(display, 60, encoder="hevc_nvenc", ten_bit=True)

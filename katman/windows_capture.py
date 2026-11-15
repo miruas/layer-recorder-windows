@@ -490,8 +490,10 @@ def dxgi_targets():
         result = subprocess.run([str(capture_binary()), "dxgi-outputs"], check=True,
                                 capture_output=True, timeout=4,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        # Desktop Duplication exposes an unrotated surface. GDI supplies the
+        # desktop orientation and keeps region coordinates in that same space.
         return {row["name"].removeprefix("\\\\.\\").casefold(): (row["adapter"], row["output"])
-                for row in json.loads(result.stdout)}
+                for row in json.loads(result.stdout) if not row.get("rotated", True)}
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         return {}
 
