@@ -156,6 +156,7 @@ def capture_controls(library, *, background=False):
     overlay = None
     overlay_messages = None
     overlay_action = b""
+    pending_screenshot = None
     overlay_hotkeys_suspended = False
     overlay_dismissed = False
     overlay_region_capture = None
@@ -529,7 +530,7 @@ def capture_controls(library, *, background=False):
             show()
 
     def poll_overlay():
-        nonlocal overlay, overlay_action, overlay_hotkeys_suspended
+        nonlocal overlay, overlay_action, overlay_hotkeys_suspended, pending_screenshot
         if overlay is None:
             return
         while True:
@@ -550,6 +551,11 @@ def capture_controls(library, *, background=False):
         overlay_hotkeys_suspended = False
         apply_hotkeys()
         if overlay_dismissed:
+            if pending_screenshot is not None:
+                action, window_handle = pending_screenshot
+                pending_screenshot = None
+                if not busy and not closing:
+                    start_screenshot(action, window_handle)
             return
         if finished.returncode:
             status.set(f"GSR overlay exited with code {finished.returncode}.")
@@ -595,7 +601,24 @@ def capture_controls(library, *, background=False):
         elif not busy and action == b"toggle_stream":
             toggle_stream(from_overlay=True)
 
+    def start_screenshot(action, window_handle=None):
+        from .windows_screenshot import screenshot_settings, screenshot_source, take_screenshot
+
+        try:
+            settings = screenshot_settings()
+            if action == "screenshot_region" or (
+                action == "screenshot" and settings.get("record_area_option") == "region"
+            ):
+                launch_overlay("region")
+                return
+            source = screenshot_source(settings, action, window_handle=window_handle)
+            clipboard_owner = root.winfo_id()
+            submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
+        except (OSError, RuntimeError) as error:
+            status.set(str(error))
+
     def handle_hotkey(action, *, from_overlay=False):
+        nonlocal overlay_dismissed, pending_screenshot
         if action == "toggle_overlay":
             toggle_overlay()
         elif action == "toggle_stream":
@@ -604,31 +627,12 @@ def capture_controls(library, *, background=False):
             if capture is not None and mode == "record":
                 submit("pause", capture.toggle_pause)
         elif action in {"screenshot", "screenshot_window", "screenshot_region"}:
-            from .windows_screenshot import screenshot_settings, screenshot_source, take_screenshot
-
-            try:
-                if overlay is not None and overlay.poll() is None:
-                    stop_overlay()
-                    try:
-                        overlay.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        terminate_overlay(overlay)
-                        overlay.wait(timeout=2)
-                if overlay is not None:
-                    poll_overlay()
-                    if busy:
-                        return
-                settings = screenshot_settings()
-                if action == "screenshot_region" or (
-                    action == "screenshot" and settings.get("record_area_option") == "region"
-                ):
-                    launch_overlay("region")
-                    return
-                source = screenshot_source(settings, action)
-                clipboard_owner = root.winfo_id()
-                submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
-            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
-                status.set(str(error))
+            if overlay is None:
+                start_screenshot(action)
+            else:
+                pending_screenshot = action, overlay_window or 0
+                overlay_dismissed = True
+                stop_overlay()
         elif action == "editor":
             open_editor()
         elif action in {"toggle_record", "gsr_toggle_record", "toggle_window_record", "toggle_region_record"}:

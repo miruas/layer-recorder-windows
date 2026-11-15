@@ -16,9 +16,17 @@ from katman.windows_capture import (
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
 from katman.windows_stream import CustomDestination, Livestream, stream_video_command
+from katman.windows_screenshot import screenshot_source
 
 
 class ReplayTests(unittest.TestCase):
+    def test_window_screenshot_uses_window_that_preceded_overlay(self):
+        with patch("katman.windows_screenshot.foreground_window", return_value=999) as foreground:
+            self.assertEqual(screenshot_source({}, "screenshot_window", window_handle=321),
+                             ["-i", "hwnd=321"])
+            foreground.assert_not_called()
+            self.assertEqual(screenshot_source({}, "screenshot_window"), ["-i", "hwnd=999"])
+
     def test_replay_after_display_disconnect_ends_at_last_video_fragment(self):
         display = Display("DISPLAY1", 0, 0, 320, 240)
         audio = AudioSource("audio", "Test microphone", "microphone")

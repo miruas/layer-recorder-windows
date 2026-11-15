@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import time
 
-from .windows_capture import displays
+from .windows_capture import displays, foreground_window
 
 
 def gsr_settings(section):
@@ -28,15 +28,14 @@ def screenshot_settings():
     return gsr_settings("screenshot")
 
 
-def screenshot_source(settings, target):
+def screenshot_source(settings, target, *, window_handle=None):
     source = settings.get("record_area_option", "focused_monitor")
     if target == "screenshot_window" or source == "window":
-        user32 = ctypes.WinDLL("user32", use_last_error=True)
-        user32.GetForegroundWindow.restype = wintypes.HWND
-        window = user32.GetForegroundWindow()
-        if not window:
+        if window_handle is None:
+            window_handle = foreground_window()
+        if not window_handle:
             raise RuntimeError("No active window to capture.")
-        return ["-i", f"hwnd={window}"]
+        return ["-i", f"hwnd={window_handle}"]
 
     monitor = capture_monitor(source)
     return desktop_source(monitor.x, monitor.y, monitor.width, monitor.height)
