@@ -71,6 +71,24 @@ jobs:
       - name: Package the Windows build
         if: github.event_name == 'push'
         run: ./tools/package-windows.ps1 -Output .
+      - name: Verify the packaged Windows build
+        if: github.event_name == 'push'
+        run: |
+          $archive = 'Layer-Windows-x64.zip'
+          $hash = (Get-Content "$archive.sha256") -split ' '
+          if ((Get-FileHash $archive).Hash -ne $hash[0]) { throw 'Windows archive checksum mismatch.' }
+          $destination = Join-Path $env:RUNNER_TEMP 'layer-portable-test'
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination
+          Push-Location "$destination/Layer-Windows-x64"
+          try {
+            python -m katman doctor
+            if ($LASTEXITCODE -ne 0) { throw 'The packaged Windows capture environment is incomplete.' }
+            foreach ($file in 'bin/layer-studio.exe', 'overlay/layer-gsr-overlay.exe', 'Layer-source.zip') {
+              if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing packaged file: $file" }
+            }
+          } finally {
+            Pop-Location
+          }
       - name: Upload Windows build
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v6

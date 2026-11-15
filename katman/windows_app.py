@@ -16,7 +16,7 @@ import time
 
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
-    Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
+    Capture, Display, capture_binary, displays, dxgi_targets, foreground_window, recording_container, video_color_range,
     ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
     GSR_NVENC_RECORDING_CODECS, gsr_recording_encoder, gsr_ten_bit, nvenc_available, video_framerate_mode,
     video_resolution, window_source,
@@ -940,6 +940,7 @@ def main():
         else:
             paths = {program: shutil.which(program) for program in ("ffmpeg", "ffprobe")}
             available = []
+            compiled = set()
             capture_available = False
             if paths["ffmpeg"]:
                 for option, token in (("-encoders", None), ("-devices", "gdigrab")):
@@ -949,10 +950,17 @@ def main():
                     if token:
                         capture_available = token in names
                     else:
+                        compiled = names
                         available = [encoder for encoder in ENCODERS if encoder in names]
             engine = capture_binary()
+            nvenc = {}
+            for codec, encoder in {"h264": "h264_nvenc", **GSR_NVENC_RECORDING_CODECS}.items():
+                nvenc[codec] = encoder in compiled and nvenc_available(encoder)
+                if codec in GSR_NVENC_RECORDING_CODECS:
+                    nvenc[f"{codec}_10bit"] = nvenc[codec] and nvenc_available(encoder, ten_bit=True)
             print(json.dumps({**paths, "capture_engine": str(engine) if engine.is_file() else None,
                               "gdigrab": capture_available, "encoders": available,
+                              "nvenc": nvenc, "dxgi_outputs": dxgi_targets() if engine.is_file() else {},
                               "displays": [asdict(display) for display in displays()]}, indent=2))
             if not engine.is_file() or not all(paths.values()) or not capture_available or "libx264" not in available:
                 raise SystemExit(1)
