@@ -18,7 +18,7 @@ from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
     ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
-    gsr_recording_encoder, nvenc_available, video_framerate_mode, video_resolution, window_source,
+    GSR_NVENC_RECORDING_CODECS, gsr_recording_encoder, nvenc_available, video_framerate_mode, video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -507,7 +507,8 @@ def capture_controls(library, *, background=False):
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory,
-                     "LAYER_GSR_HEVC_NVENC": str(int(hevc_available))},
+                     **{f"LAYER_GSR_{codec.upper()}_NVENC": str(int(available))
+                        for codec, available in nvenc_recording_support.items()}},
             )
             overlay_action = b""
             overlay_messages = queue.SimpleQueue()
@@ -848,13 +849,13 @@ def capture_controls(library, *, background=False):
     apply_hotkeys()
     update_buttons()
     root.after(150, poll)
-    hevc_available = False
+    nvenc_recording_support = dict.fromkeys(GSR_NVENC_RECORDING_CODECS, False)
 
-    def detect_hevc():
-        nonlocal hevc_available
-        hevc_available = nvenc_available("hevc_nvenc")
+    def detect_recording_codecs():
+        for codec, encoder in GSR_NVENC_RECORDING_CODECS.items():
+            nvenc_recording_support[codec] = nvenc_available(encoder)
 
-    threading.Thread(target=detect_hevc, daemon=True).start()
+    threading.Thread(target=detect_recording_codecs, daemon=True).start()
 
     def check_replay_startup():
         nonlocal last_startup_power, last_startup_game, startup_replay

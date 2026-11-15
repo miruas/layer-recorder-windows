@@ -18,6 +18,8 @@ from .common import APP, atomic_json, probe
 
 TIMESCALE = 90_000
 RECORDING_CONTAINERS = {"mp4": ".mp4", "matroska": ".mkv", "mov": ".mov", "flv": ".flv"}
+GSR_NVENC_RECORDING_CODECS = {"hevc": "hevc_nvenc", "av1": "av1_nvenc"}
+NVENC_ENCODERS = {"h264_nvenc", *GSR_NVENC_RECORDING_CODECS.values()}
 
 
 def recording_container(settings):
@@ -166,12 +168,16 @@ def nvenc_available(encoder):
 
 
 def gsr_recording_encoder(options, selected, container, replay_container):
-    if isinstance(options, dict) and options.get("video_codec") == "hevc":
+    codec = options.get("video_codec") if isinstance(options, dict) else None
+    if isinstance(codec, str) and codec in GSR_NVENC_RECORDING_CODECS:
+        if codec == "av1" and any(value in ("mov", "flv") for value in (container, replay_container)):
+            raise ValueError("Use MP4 or MKV for AV1 recording and replay.")
         if "flv" in (container, replay_container):
-            raise ValueError("Use MP4, MKV or MOV for HEVC recording and replay.")
-        if not nvenc_available("hevc_nvenc"):
-            raise RuntimeError("HEVC NVENC could not start on this device.")
-        return "hevc_nvenc"
+            raise ValueError(f"Use MP4, MKV or MOV for {codec.upper()} recording and replay.")
+        encoder = GSR_NVENC_RECORDING_CODECS[codec]
+        if not nvenc_available(encoder):
+            raise RuntimeError(f"{codec.upper()} NVENC could not start on this device.")
+        return encoder
     return gsr_h264_encoder(options, selected)
 
 
@@ -206,6 +212,7 @@ def capture_command(display, fps, encoder):
         "libx264": ["-preset", "ultrafast", "-tune", "zerolatency", "-crf", "21"],
         "h264_nvenc": ["-preset", "p3", "-rc", "vbr", "-cq", "21", "-b:v", "0"],
         "hevc_nvenc": ["-preset", "p3", "-rc", "vbr", "-cq", "23", "-b:v", "0"],
+        "av1_nvenc": ["-preset", "p3", "-rc", "vbr", "-cq", "23", "-b:v", "0"],
         "h264_amf": ["-quality", "speed", "-b:v", "12M"],
         "h264_qsv": ["-preset", "veryfast", "-global_quality", "21"],
     }
@@ -337,8 +344,7 @@ def set_video_rate_control(command, settings):
         bitrate = f"{value}k"
         controls = {
             "libx264": ["-x264-params", "nal-hrd=cbr"],
-            "h264_nvenc": ["-rc", "cbr"],
-            "hevc_nvenc": ["-rc", "cbr"],
+            **dict.fromkeys(NVENC_ENCODERS, ["-rc", "cbr"]),
             "h264_amf": ["-rc", "cbr"],
             "h264_qsv": [],
         }
@@ -349,7 +355,7 @@ def set_video_rate_control(command, settings):
         index = command.index("-b:v", codec_pos)
         command[index:index + 2] = ["-rc", "cqp", "-qp_i", str(value), "-qp_p", str(value)]
     else:
-        flag = {"libx264": "-crf", "h264_nvenc": "-cq", "hevc_nvenc": "-cq", "h264_qsv": "-global_quality"}[encoder]
+        flag = "-cq" if encoder in NVENC_ENCODERS else {"libx264": "-crf", "h264_qsv": "-global_quality"}[encoder]
         command[command.index(flag, codec_pos) + 1] = str(value)
 
 
@@ -529,7 +535,7 @@ class Capture:
         self.duplication_failed = set()
         self.duplication_layout = ()
         self.duplication_targets = {}
-        if encoder in ("h264_nvenc", "hevc_nvenc"):
+        if encoder in NVENC_ENCODERS:
             try:
                 self._update_duplication_layout(displays())
             except OSError:
@@ -549,14 +555,14 @@ class Capture:
             raise
 
     def _update_duplication_layout(self, current):
-        if self.encoder not in ("h264_nvenc", "hevc_nvenc") or tuple(current) == self.duplication_layout:
+        if self.encoder not in NVENC_ENCODERS or tuple(current) == self.duplication_layout:
             return
         self.duplication_layout = tuple(current)
         self.duplication_targets = dxgi_targets() if current else {}
         self.duplication_failed.clear()
 
     def _duplication_target(self, source):
-        if (self.encoder not in ("h264_nvenc", "hevc_nvenc") or self.resolution is not None or self.color_range == "pc" or
+        if (self.encoder not in NVENC_ENCODERS or self.resolution is not None or self.color_range == "pc" or
                 self.framerate_mode == "content" or source.key in self.duplication_failed or
                 source.width % 2 or source.height % 2):
             return None

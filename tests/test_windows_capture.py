@@ -19,6 +19,20 @@ from katman.windows_stream import CustomDestination, Livestream, stream_video_co
 
 
 class ReplayTests(unittest.TestCase):
+    def test_av1_uses_nvenc_for_mp4_and_mkv(self):
+        options = {"video_codec": "av1"}
+        with patch("katman.windows_capture.nvenc_available", return_value=True) as available:
+            self.assertEqual(gsr_recording_encoder(options, "libx264", "mp4", "matroska"), "av1_nvenc")
+            available.assert_called_once_with("av1_nvenc")
+            for container in ("mov", "flv"):
+                with self.assertRaisesRegex(ValueError, "MP4 or MKV"):
+                    gsr_recording_encoder(options, "libx264", "mp4", container)
+        display = Display("Primary", 0, 0, 1920, 1080, True)
+        args = desktop_duplication_command(display, 60, encoder="av1_nvenc")
+        set_video_rate_control(args, ("cbr", 8000))
+        self.assertEqual(args[args.index("-c:v") + 1], "av1_nvenc")
+        self.assertEqual(args[args.index("-rc") + 1], "cbr")
+
     def test_hevc_requires_nvenc_and_a_compatible_container(self):
         options = {"video_codec": "hevc"}
         with patch("katman.windows_capture.nvenc_available", return_value=True) as available:
