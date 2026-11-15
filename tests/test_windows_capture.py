@@ -19,6 +19,12 @@ from katman.windows_stream import CustomDestination, Livestream, stream_video_co
 
 
 class ReplayTests(unittest.TestCase):
+    def test_10_bit_desktop_duplication_requires_10_bit_surfaces(self):
+        display = Display("Primary", 0, 0, 1920, 1080, True)
+        command = desktop_duplication_command(display, 60, encoder="hevc_nvenc", ten_bit=True)
+        self.assertIn("ddagrab=output_idx=0:framerate=60:output_fmt=x2bgr10:force_fmt=1", command)
+        self.assertNotIn("-pix_fmt", command)
+
     def test_ten_bit_gsr_codecs_probe_the_requested_pixel_format(self):
         for codec in ("hevc", "av1"):
             with (self.subTest(codec=codec),

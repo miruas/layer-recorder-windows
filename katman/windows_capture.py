@@ -232,12 +232,13 @@ def capture_command(display, fps, encoder):
             "empty_moov+default_base_moof+frag_keyframe+skip_trailer", "-f", "mp4", "pipe:1"]
 
 
-def desktop_duplication_command(display, fps, monitor=None, target=None, *, encoder="h264_nvenc"):
+def desktop_duplication_command(display, fps, monitor=None, target=None, *, encoder="h264_nvenc", ten_bit=False):
     command = capture_command(display, fps, encoder)
     # Pass D3D11 surfaces directly to NVENC. CFR normalizes DXGI timestamps
     # to one frame per output tick before the fragmented MP4 muxer.
     output = target[1] if target is not None else 0
-    source = f"ddagrab=output_idx={output}:framerate={fps}:output_fmt=bgra"
+    pixel_format = "x2bgr10:force_fmt=1" if ten_bit else "bgra"
+    source = f"ddagrab=output_idx={output}:framerate={fps}:output_fmt={pixel_format}"
     if monitor is not None and display != monitor:
         source += (f":video_size={display.width}x{display.height}"
                    f":offset_x={display.x - monitor.x}:offset_y={display.y - monitor.y}")
@@ -571,7 +572,7 @@ class Capture:
         self.duplication_failed.clear()
 
     def _duplication_target(self, source):
-        if (self.encoder not in NVENC_ENCODERS or self.ten_bit or self.resolution is not None or self.color_range == "pc" or
+        if (self.encoder not in NVENC_ENCODERS or self.resolution is not None or self.color_range == "pc" or
                 self.framerate_mode == "content" or source.key in self.duplication_failed or
                 source.width % 2 or source.height % 2):
             return None
@@ -590,7 +591,8 @@ class Capture:
         if isinstance(source, Display):
             target = self._duplication_target(source)
             backend = "ddagrab" if target else "gdigrab"
-            command = (desktop_duplication_command(source, self.fps, *target, encoder=self.encoder) if target
+            command = (desktop_duplication_command(source, self.fps, *target, encoder=self.encoder,
+                                                   ten_bit=self.ten_bit) if target
                        else scale_video(capture_command(source, self.fps, self.encoder), self.resolution))
             set_capture_cursor(command, self.cursor)
             set_video_rate_control(command, self.rate_control)

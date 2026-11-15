@@ -44,7 +44,7 @@ The bundled overlay uses the original Layer-patched GSR interface for Replay, Re
 With GSR's **Auto** or **H264** codec, Layer uses NVIDIA NVENC when a short encode confirms that it can start. An explicit hardware choice in the recorder takes precedence. Choose **H264 Software Encoder** in GSR to force software encoding.
 
 **HEVC** and **AV1** appear in Record and Instant Replay settings when the corresponding NVIDIA encoder passes a startup check. HEVC supports MP4, MKV and MOV. AV1 supports MP4 and MKV.
-Their **10 bit** options encode SDR capture in 10-bit 4:2:0 using GDI and NVENC.
+Their **10 bit** options encode SDR capture in 10-bit 4:2:0 using NVENC. Layer requests 10-bit desktop frames through Desktop Duplication and uses GDI capture with 10-bit encoding if that fails.
 
 GSR's **Audio codec** setting applies to the independent audio tracks for Record and Instant Replay. A replay saved during recording shares the active recording's encoded tracks. MOV and FLV output convert Opus tracks to AAC for container compatibility.
 
