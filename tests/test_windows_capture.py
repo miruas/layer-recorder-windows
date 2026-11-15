@@ -14,7 +14,8 @@ from unittest.mock import Mock, call, patch
 from katman.common import load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
-    Capture, Display, capture_binary, capture_command, desktop_duplication_command, dxgi_targets, gsr_h264_encoder,
+    Capture, Display, ReplayAutostart, capture_binary, capture_command, desktop_duplication_command, dxgi_targets,
+    gsr_h264_encoder, replay_autostart_trigger,
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
 from katman.windows_audio import (
@@ -27,6 +28,39 @@ from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 
 
 class ReplayTests(unittest.TestCase):
+    def test_autostart_trigger_preserves_legacy_game_mode_and_respects_ac_power(self):
+        game, power = Mock(return_value=42), Mock(return_value=False)
+        mode = "turn_on_replay_automatically_mode"
+        self.assertIsNone(replay_autostart_trigger({}, game, power))
+        game.assert_not_called()
+        power.assert_not_called()
+        self.assertEqual(replay_autostart_trigger({mode: "turn_on_at_fullscreen"}, game, power), ("game", 42))
+        self.assertEqual(replay_autostart_trigger({mode: "turn_on_at_game_launch"}, game, power), ("game", 42))
+        self.assertIsNone(replay_autostart_trigger(
+            {mode: "turn_on_at_system_startup", "only_start_replay_if_power_supply_connected": True}, game, power))
+        power.return_value = True
+        self.assertEqual(replay_autostart_trigger(
+            {mode: "turn_on_at_system_startup", "only_start_replay_if_power_supply_connected": True}, game, power),
+            ("startup",))
+
+    def test_autostart_leaves_manual_and_streaming_sessions_untouched(self):
+        policy = ReplayAutostart()
+        self.assertIsNone(policy.update(("game", 42), idle=False))
+        self.assertIsNone(policy.update(None, idle=False))
+        self.assertEqual(policy.update(("game", 57), idle=True), "start")
+        policy.owns_replay = True
+        self.assertEqual(policy.update(None, idle=False), "stop")
+
+    def test_autostart_does_not_restart_after_manual_stop_until_trigger_changes(self):
+        policy = ReplayAutostart()
+        trigger = ("startup",)
+        self.assertEqual(policy.update(trigger, idle=True), "start")
+        policy.owns_replay = True
+        self.assertIsNone(policy.update(trigger, idle=False))
+        policy.owns_replay = False
+        self.assertIsNone(policy.update(trigger, idle=True))
+        self.assertEqual(policy.update(("game", 42), idle=True), "start")
+
     @unittest.skipUnless(os.name == "nt", "Requires the Windows COM calling convention.")
     def test_process_loopback_pins_late_callback_until_windows_releases_it(self):
         from contextlib import ExitStack

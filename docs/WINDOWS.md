@@ -49,6 +49,8 @@ Normal recording keeps replay available. If a standalone Instant Replay session 
 3. Use **Alt+F10** for the configured replay duration, **Alt+F11** for the short save, or **Alt+F12** for the long save. Keyboard and UI saves can use the shorter history already available. Voice saves require the full requested duration.
 4. Open **Recordings** in the GSR overlay or **Open editor** in the recorder to find the new project.
 
+In **Instant Replay → Settings**, you can start replay automatically with Layer or when a supported Steam game launches. Choose a monitor target for automatic start. The optional AC power condition also stops an automatically started replay when the machine is unplugged. Disabling automatic replay or exiting the detected game stops its automatic session. Manual capture stays under your control, and an automatic trigger does not start another capture during a livestream.
+
 ### Choose a video encoder
 
 For GSR **Auto** and **H.264**, Layer tries NVIDIA NVENC, AMD AMF and Intel Quick Sync in that order, then falls back to software H.264. The probe encodes a test frame using the same settings as the default capture path. An explicit compatible encoder choice in the Windows controls takes precedence over automatic selection. Use **H.264 Software** to force software encoding. Each hardware encoder requires a compatible FFmpeg build, hardware and driver. In the output of `.\Layer.cmd doctor`, `hardware_h264` reports which hardware encoders passed the probe and `encoders` lists the ones compiled into FFmpeg.
@@ -206,6 +208,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | GPU coverage | AMD AMF recording and replay were tested on a real Windows window and with synthetic video. Full-display and gameplay testing on AMD, physical Intel Quick Sync, multi-monitor and mixed-DPI validation remain open. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
 | Audio timing | Independently launched media producers have approximate start alignment. Broad device and workload testing for latency, drift and sync remains pending. |
 | Replay transitions | Standalone replay must be stopped before normal recording starts. Transitioning while preserving the existing replay history remains open. Effective duration is constrained by the RAM budget and retained video. |
+| Automatic game detection | Windows currently uses Steam's running-game data. Other launchers and standalone games remain outside automatic detection. |
 | Voice field testing | Language support is English. The current wake phrase match follows voice-activity-gated transcription. Live-speaker accuracy across voices, accents, microphones and gameplay noise, along with false-trigger rates and in-game FPS and audio-sync impact, has not been systematically measured. |
 | Stream compatibility | Service profiles and the verified receiver combinations are covered above. Every allowed container/protocol pair and production service configuration has not been tested. |
 | Distribution coverage | CI builds the installer and verifies the portable package. Fresh-machine installation, upgrade and uninstall across Windows versions and device configurations remain a manual compatibility matrix. |

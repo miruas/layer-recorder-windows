@@ -77,6 +77,33 @@ def running_steam_game():
     return app_id if name and name.casefold() == "steam" else None
 
 
+def replay_autostart_trigger(settings, read_game, read_power):
+    preference = settings.get("turn_on_replay_automatically_mode")
+    game_mode = preference in ("turn_on_at_game_launch", "turn_on_at_fullscreen")
+    if not game_mode and preference != "turn_on_at_system_startup":
+        return None
+    if settings.get("only_start_replay_if_power_supply_connected") is True and not read_power():
+        return None
+    if game_mode:
+        game = read_game()
+        return ("game", game) if game is not None else None
+    return ("startup",)
+
+
+class ReplayAutostart:
+    def __init__(self):
+        self.trigger = None
+        self.owns_replay = False
+
+    def update(self, trigger, *, idle):
+        changed = trigger != self.trigger
+        self.trigger = trigger
+        if self.owns_replay and trigger is None:
+            return "stop"
+        if changed and trigger is not None and idle:
+            return "start"
+        return None
+
 
 @dataclass(frozen=True)
 class Display:

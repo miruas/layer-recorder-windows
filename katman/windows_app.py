@@ -16,8 +16,9 @@ import time
 
 from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
-    Capture, Display, capture_binary, displays, dxgi_targets, foreground_window, recording_container, video_color_range,
-    ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
+    Capture, Display, ReplayAutostart, capture_binary, displays, dxgi_targets, foreground_window, recording_container,
+    video_color_range, ac_power_connected, gsr_h264_encoder, replay_autostart_trigger, replay_durations,
+    running_steam_game, video_cursor, video_rate_control,
     GSR_NVENC_RECORDING_CODECS, H264_HARDWARE_ENCODERS, gsr_frame_rate, gsr_recording_encoder, gsr_ten_bit,
     video_encoder_available, video_framerate_mode,
     video_resolution, window_source,
@@ -191,9 +192,7 @@ def capture_controls(library, *, background=False):
     hotkeys = None
     next_inventory = 0.0
     next_power_check = 0.0
-    last_startup_power = None
-    last_startup_game = None
-    startup_replay = False
+    replay_autostart = ReplayAutostart()
     next_audio_inventory = 0.0
     active_display_count = None
     busy = False
@@ -359,7 +358,7 @@ def capture_controls(library, *, background=False):
 
         threading.Thread(target=run, daemon=True).start()
 
-    def start(kind, *, use_gsr=False, window_handle=None, region=None, force_window=False):
+    def start(kind, *, use_gsr=False, window_handle=None, region=None, force_window=False, automatic=False):
         nonlocal replay_save_lengths
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
@@ -448,7 +447,7 @@ def capture_controls(library, *, background=False):
         follow_screens = follow_displays.get() and not chosen_monitor and region is None
         replay_save_lengths = save_lengths
         status.set("Starting capture…")
-        submit(kind, lambda: Capture(recording_directory, selected, rate,
+        submit("automatic_replay" if automatic else kind, lambda: Capture(recording_directory, selected, rate,
                                      gsr_recording_encoder(record_options, codec, container, replay_container)
                                      if use_gsr else codec,
                                      seconds=seconds, record=kind == "record",
@@ -808,7 +807,7 @@ def capture_controls(library, *, background=False):
     def poll():
         nonlocal voice_pending
         nonlocal capture, stream, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
-        nonlocal next_power_check, startup_replay
+        nonlocal next_power_check
         if instance.show_requested():
             show()
         try:
@@ -839,14 +838,15 @@ def capture_controls(library, *, background=False):
                 stream = None
                 if error is None:
                     status.set("Livestream stopped.")
-            if action in {"record", "replay"} and error is None:
-                capture, mode = value, action
+            if action in {"record", "replay", "automatic_replay"} and error is None:
+                capture, mode = value, "record" if action == "record" else "replay"
+                replay_autostart.owns_replay = action == "automatic_replay"
                 next_inventory = next_audio_inventory = 0.0
                 active_display_count = None
                 status.set("Recording · Replay is also active" if mode == "record" else "Replay active")
             if action == "stop":
                 capture, mode = None, None
-                startup_replay = False
+                replay_autostart.owns_replay = False
                 replay_status.set("")
             if action == "audio_inventory":
                 if error:
@@ -962,27 +962,18 @@ def capture_controls(library, *, background=False):
     threading.Thread(target=detect_recording_codecs, daemon=True).start()
 
     def check_replay_startup():
-        nonlocal last_startup_power, last_startup_game, startup_replay
-        settings = gsr_settings("replay")
-        preference = settings.get("turn_on_replay_automatically_mode")
-        game_mode = preference in ("turn_on_at_game_launch", "turn_on_at_fullscreen")
-        if preference != "turn_on_at_system_startup" and not game_mode:
-            last_startup_power = None
-            last_startup_game = None
+        if overlay is not None and capture is None and stream is None:
             return
-        plugged_only = settings.get("only_start_replay_if_power_supply_connected") is True
-        game = running_steam_game() if game_mode else None
-        previous_game, last_startup_game = last_startup_game, game
-        allowed = (not plugged_only or ac_power_connected()) and (not game_mode or game is not None)
-        previous, last_startup_power = last_startup_power, allowed
-        if startup_replay and capture is not None and not allowed:
+        settings = gsr_settings("replay")
+        trigger = replay_autostart_trigger(settings, running_steam_game, ac_power_connected)
+        action = replay_autostart.update(trigger, idle=capture is None and stream is None)
+        if action == "stop":
             stop()
-        elif allowed and (previous is not True or game != previous_game) and capture is None:
+        elif action == "start":
             options = settings.get("record_options")
             target = options.get("record_area_option") if isinstance(options, dict) else None
             if target not in ("window", "region"):
-                start("replay", use_gsr=True)
-                startup_replay = busy
+                start("replay", use_gsr=True, automatic=True)
                 return
             status.set("Select a monitor in GSR to start replay automatically.")
 
