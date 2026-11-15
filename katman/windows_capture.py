@@ -529,7 +529,8 @@ class Capture:
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
                  color_range=None, rate_control=None, container="mp4", replay_directory=None,
-                 replay_container=None, audio_codec="aac", framerate_mode=None, ten_bit=False):
+                 replay_container=None, audio_codec="aac", framerate_mode=None, ten_bit=False,
+                 gsr_audio_tracks=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -554,6 +555,7 @@ class Capture:
         self.engine = CaptureEngine(seconds, self.memory_bytes)
         self.selected = {display.key for display in selected}
         self.audio = {source.key: source for source in audio}
+        self.gsr_audio_tracks = gsr_audio_tracks
         self.follow_displays = follow_displays
         self.fixed_region = fixed_region
         self.region_monitor = None
@@ -693,9 +695,15 @@ class Capture:
             desired.update((key, track.source) for key, track in self.active.items()
                            if track.kind == "audio")
         else:
-            desired.update((source.key, source) for source in current_audio
-                           if source.key in self.audio or
-                           (self.follow_application_audio and source.kind == "application"))
+            if self.gsr_audio_tracks is not None:
+                from .windows_audio import gsr_audio_selection
+                selected_audio = gsr_audio_selection(self.gsr_audio_tracks, current_audio, allow_missing=True)
+                if any(source.kind == "system" for source in selected_audio):
+                    selected_audio = [source for source in selected_audio if source.kind != "application"]
+            else:
+                selected_audio = [source for source in current_audio if source.key in self.audio or
+                                  (self.follow_application_audio and source.kind == "application")]
+            desired.update((source.key, source) for source in selected_audio)
         now = time.monotonic()
         for key, track in tuple(self.active.items()):
             source = desired.get(key)
@@ -756,7 +764,7 @@ class Capture:
         if self.paused:
             current = displays()
             current_audio = None
-            if self.audio or self.follow_application_audio:
+            if self.audio or self.follow_application_audio or self.gsr_audio_tracks:
                 from .windows_audio import audio_sources
                 current_audio = audio_sources()
             self.engine.request("resume_clock")

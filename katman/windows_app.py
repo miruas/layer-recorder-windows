@@ -402,8 +402,9 @@ def capture_controls(library, *, background=False):
 
             try:
                 inventory = read_audio_inventory()
-                sources = (gsr_audio_selection(configured_tracks, inventory) if configured_tracks is not None
-                           else [source for source in inventory if source.default][:1])
+                if configured_tracks is None:
+                    configured_tracks = [{"audio_inputs": ["default_output"]}]
+                sources = gsr_audio_selection(configured_tracks, inventory, allow_missing=True)
             except (OSError, ValueError) as error:
                 status.set(str(error))
                 show()
@@ -430,7 +431,8 @@ def capture_controls(library, *, background=False):
                                      rate_control=rate_control, container=container, replay_directory=replay_directory,
                                      replay_container=replay_container, audio_codec=audio_codec,
                                      framerate_mode=video_framerate_mode(record_options),
-                                     ten_bit=gsr_ten_bit(record_options)))
+                                     ten_bit=gsr_ten_bit(record_options),
+                                     gsr_audio_tracks=configured_tracks))
 
     def stop():
         status.set("Finishing capture…")
@@ -841,7 +843,8 @@ def capture_controls(library, *, background=False):
             check_replay_startup()
         if capture is not None and not capture.paused and not busy and now >= next_inventory:
             next_inventory = now + 1
-            inspect_audio = (capture.audio or capture.follow_application_audio) and now >= next_audio_inventory
+            inspect_audio = (capture.audio or capture.follow_application_audio or
+                             capture.gsr_audio_tracks) and now >= next_audio_inventory
             if inspect_audio:
                 next_audio_inventory = now + 3
             session = capture

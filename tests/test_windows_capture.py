@@ -20,6 +20,28 @@ from katman.windows_screenshot import screenshot_source
 
 
 class ReplayTests(unittest.TestCase):
+    def test_gsr_audio_tracks_follow_selected_app_when_its_pid_changes(self):
+        display = Display("DISPLAY1", 0, 0, 320, 240)
+        first = AudioSource("app:123", "game.exe (PID 123)", "application", pid=123)
+        restarted = AudioSource("app:456", "game.exe (PID 456)", "application", pid=456)
+        other = AudioSource("app:789", "other.exe (PID 789)", "application", pid=789)
+        tracks = [{"audio_inputs": ["app:game.exe"]}]
+        with (tempfile.TemporaryDirectory() as folder,
+              patch("katman.windows_capture.shutil.which", return_value="ffmpeg"),
+              patch("katman.windows_capture.CaptureEngine") as engine):
+            engine.return_value.request.return_value = None
+            capture = Capture(folder, [display], record=True, gsr_audio_tracks=tracks)
+            try:
+                capture.reconcile([display], [other])
+                self.assertEqual(set(capture.active), {display.key})
+                capture.reconcile([display], [first, other])
+                self.assertEqual(set(capture.active), {display.key, first.key})
+                capture.reconcile([display], [restarted, other])
+                self.assertEqual(set(capture.active), {display.key, restarted.key})
+                self.assertTrue(next(track for track in capture.tracks if track.source == first).stopped)
+            finally:
+                capture.stop()
+
     def test_gsr_frame_rate_defaults_to_60_for_missing_or_legacy_settings(self):
         self.assertEqual(stream_frame_rate({}), 60)
         self.assertEqual(stream_frame_rate({"record_options": {"fps": 0}}), 60)

@@ -291,7 +291,7 @@ def gsr_audio_inventory(sources):
     return "\n".join(rows)
 
 
-def gsr_audio_selection(tracks, sources):
+def gsr_audio_selection(tracks, sources, *, allow_missing=False):
     if not isinstance(tracks, list):
         raise ValueError("Invalid audio tracks in the GSR configuration.")
     wanted = set()
@@ -308,7 +308,7 @@ def gsr_audio_selection(tracks, sources):
             wanted.add(gsr_audio_id(default).casefold())
     selected = [source for source in sources if gsr_audio_id(source).casefold() in wanted]
     missing = wanted.difference(gsr_audio_id(source).casefold() for source in selected)
-    if missing:
+    if missing and not allow_missing:
         raise ValueError("Some audio sources selected in GSR are unavailable. Review the capture settings.")
     return selected
 
