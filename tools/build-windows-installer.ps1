@@ -19,7 +19,11 @@ foreach ($entry in Get-ChildItem "$PythonRoot/Lib") {
     if ($entry.Name -in @('site-packages','__pycache__','test','tests','idlelib','turtledemo','ensurepip')) { continue }
     Copy-Item -LiteralPath $entry.FullName -Destination "$runtime/Lib" -Recurse -Force
 }
-& "$PythonRoot/python.exe" -m pip install --only-binary=:all: --no-compile --target "$runtime/Lib/site-packages" 'Pillow==12.3.0' 'numpy==2.5.4' 'opencv-python-headless==4.14.0.94' 'pystray==0.19.5' 'six==1.17.0'
+$runtimePackages = @(
+    'Pillow==12.3.0', 'numpy==2.5.4', 'opencv-python-headless==4.14.0.94', 'pystray==0.19.5', 'six==1.17.0'
+    'faster-whisper==1.2.1', 'sounddevice==0.5.6', 'webrtcvad-wheels==2.0.14.post1'
+)
+& "$PythonRoot/python.exe" -m pip install --only-binary=:all: --no-compile --target "$runtime/Lib/site-packages" @runtimePackages
 if ($LASTEXITCODE -ne 0) { throw 'Could not assemble the private runtime.' }
 Copy-Item -Recurse (Join-Path $root 'katman'),(Join-Path $root 'licenses') -Destination $Stage -Force
 Copy-Item (Join-Path $root 'LICENSE'),(Join-Path $root 'NOTICE.md') -Destination $Stage -Force

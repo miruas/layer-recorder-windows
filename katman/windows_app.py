@@ -127,6 +127,9 @@ def capture_controls(library, *, background=False):
     from tkinter import filedialog, ttk
 
     from .windows_tray import RecorderInstance, create_tray
+    from .voice_control import VoiceConfig, load_config, save_config
+    from .windows_voice import VoiceListener, local_model
+    from .windows_voice_settings import show_voice_settings
 
     instance = RecorderInstance()
     if not instance.primary:
@@ -145,6 +148,14 @@ def capture_controls(library, *, background=False):
     panel = ttk.Frame(root, padding=20)
     panel.pack(fill="both", expand=True)
     status = tk.StringVar(value="Select the displays you want to capture.")
+    voice_status = tk.StringVar(value="Voice Control is off.")
+    voice = VoiceListener()
+    voice_pending = None
+    try:
+        voice_config = load_config()
+    except (OSError, ValueError) as error:
+        voice_config = VoiceConfig()
+        voice_status.set(f"Could not load Voice Control settings: {error}")
     replay_status = tk.StringVar()
     options = []
     audio_options = []
@@ -438,9 +449,38 @@ def capture_controls(library, *, background=False):
         status.set("Finishing capture…")
         submit("stop", capture.finish_recording if mode == "record" else capture.stop)
 
-    def save(seconds):
+    def save(seconds, *, require_full_duration=False):
         status.set("Saving replay…")
-        submit("save", lambda: capture.save_replay(seconds))
+        submit("save", lambda: capture.save_replay(seconds, require_full_duration=require_full_duration))
+
+    def apply_voice_config(config):
+        nonlocal voice_config, voice_pending
+        if config.enabled:
+            try:
+                local_model()
+            except RuntimeError as error:
+                raise ValueError(str(error)) from error
+        save_config(config)
+        voice_config = config
+        voice_pending = None
+        voice.configure(config)
+
+    def open_voice_settings():
+        show_voice_settings(root, voice_config, apply_voice_config, voice_status)
+
+    def handle_voice(command):
+        if command.action == "save_replay":
+            if capture is None:
+                status.set("Start replay or recording before saving a replay.")
+            else:
+                save(command.seconds, require_full_duration=True)
+        elif command.action == "toggle_recording":
+            handle_hotkey("gsr_toggle_record")
+        elif command.action == "start_recording":
+            if mode != "record":
+                handle_hotkey("gsr_toggle_record")
+        elif command.action == "stop_recording" and mode == "record":
+            stop()
 
     def toggle_stream(*, from_overlay=False):
         if stream is not None:
@@ -706,6 +746,10 @@ def capture_controls(library, *, background=False):
     ttk.Label(panel, text="Alt+Z  Open overlay").grid(row=14, column=2, sticky="e")
     ttk.Label(panel, textvariable=replay_status, wraplength=490).grid(
         row=15, column=0, columnspan=3, sticky="w", pady=(6, 0))
+    ttk.Button(panel, text="Voice Control…", command=open_voice_settings).grid(
+        row=16, column=0, sticky="w", pady=(8, 0))
+    ttk.Label(panel, textvariable=voice_status, wraplength=490).grid(
+        row=17, column=0, columnspan=3, sticky="w")
 
     def update_buttons():
         idle = not busy and capture is None
@@ -732,6 +776,7 @@ def capture_controls(library, *, background=False):
                 stop()
 
     def poll():
+        nonlocal voice_pending
         nonlocal capture, stream, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
         nonlocal next_power_check, startup_replay
         if instance.show_requested():
@@ -840,6 +885,20 @@ def capture_controls(library, *, background=False):
                 pass
 
         now = time.monotonic()
+        if not closing:
+            for kind, value in voice.read():
+                if kind == "status":
+                    voice_status.set(value)
+                else:
+                    voice_pending = (value, now)
+            if voice_pending is not None:
+                command, received = voice_pending
+                if now - received >= 2:
+                    voice_pending = None
+                    status.set("Voice command expired while capture was busy.")
+                elif not busy:
+                    voice_pending = None
+                    handle_voice(command)
         if not busy and not closing and now >= next_power_check:
             next_power_check = now + 2
             check_replay_startup()
@@ -903,9 +962,12 @@ def capture_controls(library, *, background=False):
         refresh_audio()
 
     root.after(200, initialize_capture)
+    if voice_config.enabled:
+        voice.configure(voice_config)
     try:
         root.mainloop()
     finally:
+        voice.close()
         stop_overlay()
         if overlay is not None:
             try:

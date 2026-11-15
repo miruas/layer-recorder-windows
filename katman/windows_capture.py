@@ -811,7 +811,7 @@ class Capture:
         finally:
             self.stop()
 
-    def save_replay(self, seconds):
+    def save_replay(self, seconds, *, require_full_duration=False):
         if not 0 < seconds <= self.seconds:
             raise ValueError("Replay duration must fit inside the configured buffer.")
         state = self._status()
@@ -820,6 +820,8 @@ class Capture:
         if bounds is None:
             raise RuntimeError("No video is available in the replay buffer.")
         first, end = bounds
+        if require_full_duration and end - first < seconds:
+            raise ValueError(f"Requested {seconds:g} s, but only {int(end - first)} s of replay is available.")
         cutoff = max(first, end - seconds)
         self.replay_directory.mkdir(parents=True, exist_ok=True)
         folder = Path(tempfile.mkdtemp(prefix="Layer-replay-", dir=self.replay_directory))

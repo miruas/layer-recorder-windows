@@ -40,6 +40,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:LAYER_CAPTURE_BINARY = (Resolve-Path native/windows-capture/target/debug/layer-capture.exe).Path
           python -m unittest discover -s tests -p test_windows_capture.py -v
+      - name: Test Voice Control
+        run: python -m unittest discover -s tests -p test_windows_voice.py -v
       - name: Test native Studio
         run: |
           $env:LAYER_PYTHON = (Get-Command python).Source

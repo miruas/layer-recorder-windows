@@ -26,7 +26,7 @@ if (!(Test-Path -LiteralPath $venvPython -PathType Leaf)) {
     & $Python @version -m venv $venv
     if ($LASTEXITCODE -ne 0) { throw 'Could not create the Layer Python environment.' }
 }
-& $venvPython -m pip install --editable $root
+& $venvPython -m pip install --editable "${root}[voice]"
 if ($LASTEXITCODE -ne 0) { throw 'Layer installation failed.' }
 & $venvPython -m katman doctor
 if ($LASTEXITCODE -ne 0) { throw 'Layer could not verify the capture environment.' }

@@ -60,6 +60,14 @@ A selected recording or replay region follows its original display when Windows 
 
 When you save a specific monitor in GSR, Layer uses the Windows monitor interface ID so the selection survives changes to the display number. Older display-number settings remain readable.
 
+## Voice Control
+
+Open **Voice Control…** in the recorder settings. Install the English speech model once (78 MB), select a microphone, choose a wake phrase such as `Kivo`, then enable Voice Control and click **Apply**. Say the wake phrase and command together. The listener also works while Layer is in the notification area.
+
+Add, edit, or delete commands for starting, stopping, or toggling recording and for saving Instant Replay. Put `{duration}` where you want to say the replay length. With `save the last {duration}`, say “Kivo, save the last two minutes and fifteen seconds” for a 135-second clip. Replay or recording must already be active, and the full requested duration must fit the configured buffer and currently available video history.
+
+Recognition runs locally on the CPU after voice activity is detected. Layer keeps microphone samples in memory for command recognition and releases the microphone and model when Voice Control is disabled. To install the Voice Control dependencies into a source or portable Python environment, use `python -m pip install ".[voice]"`.
+
 ## Edit and export
 
 Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` directory together. Choose **Open editor** to browse the library or open an existing project. Studio mixes enabled audio tracks during timeline playback. **Record voiceover** captures the selected microphone and inserts a separate audio clip at the playhead.
