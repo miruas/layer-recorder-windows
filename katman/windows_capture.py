@@ -21,6 +21,7 @@ RECORDING_CONTAINERS = {"mp4": ".mp4", "matroska": ".mkv", "mov": ".mov", "flv":
 GSR_NVENC_RECORDING_CODECS = {"hevc": "hevc_nvenc", "av1": "av1_nvenc"}
 NVENC_ENCODERS = {"h264_nvenc", *GSR_NVENC_RECORDING_CODECS.values()}
 GSR_H264_CODECS = (None, "", "auto", "h264", "h264_software")
+H264_HARDWARE_ENCODERS = ("h264_nvenc", "h264_amf", "h264_qsv")
 
 
 def recording_container(settings):
@@ -163,16 +164,21 @@ def gsr_h264_encoder(options, selected):
         raise ValueError("Windows livestreaming supports Auto, H.264 and H.264 Software. Select one in GSR.")
     if selected != "libx264":
         return selected
-    return "h264_nvenc" if nvenc_available("h264_nvenc") else selected
+    return next((encoder for encoder in H264_HARDWARE_ENCODERS if video_encoder_available(encoder)), selected)
 
 
-def nvenc_available(encoder, *, ten_bit=False):
-    pixel_format = ["-pix_fmt", "p010le"] if ten_bit else []
+def video_encoder_available(encoder, *, ten_bit=False):
+    # Exercise the same pixel format, encoder options and fragmented MP4
+    # output as the GDI capture path, using a frame independent of the desktop.
+    command = capture_command(Display("Encoder probe", 0, 0, 640, 360), 60, encoder)
+    command[4:command.index("-an")] = ["-nostdin", "-f", "lavfi", "-i", "color=c=black:s=640x360:r=60"]
+    codec_index = command.index("-c:v")
+    command[codec_index:codec_index] = ["-frames:v", "1"]
+    if ten_bit:
+        command[command.index("-pix_fmt") + 1] = "p010le"
     try:
         result = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-             "-f", "lavfi", "-i", "color=c=black:s=640x360:r=60",
-             "-frames:v", "1", "-c:v", encoder, *pixel_format, "-preset", "p3", "-f", "null", "-"],
+            command,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -196,7 +202,7 @@ def gsr_recording_encoder(options, selected, container, replay_container):
         if "flv" in (container, replay_container):
             raise ValueError(f"Use MP4, MKV or MOV for {codec.upper()} recording and replay.")
         encoder = GSR_NVENC_RECORDING_CODECS[codec]
-        if not (nvenc_available(encoder, ten_bit=True) if ten_bit else nvenc_available(encoder)):
+        if not video_encoder_available(encoder, ten_bit=ten_bit):
             raise RuntimeError(f"{codec.upper()} NVENC could not start on this device.")
         return encoder
     if codec not in GSR_H264_CODECS:

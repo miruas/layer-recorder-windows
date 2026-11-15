@@ -49,7 +49,7 @@ Normal recording keeps replay available. If a standalone Instant Replay session 
 
 ### Choose a video encoder
 
-For GSR **Auto** and **H.264**, Layer probes NVIDIA NVENC and can fall back to software H.264. An explicit compatible encoder choice in the Windows controls can take precedence. Use **H.264 Software** to force software encoding. The Windows controls expose explicit H.264 choices for NVENC, AMD AMF and Intel Quick Sync. Each requires a compatible FFmpeg build, hardware and driver.
+For GSR **Auto** and **H.264**, Layer tries NVIDIA NVENC, AMD AMF and Intel Quick Sync in that order, then falls back to software H.264. The probe encodes a test frame using the same settings as the default capture path. An explicit compatible encoder choice in the Windows controls takes precedence over automatic selection. Use **H.264 Software** to force software encoding. Each hardware encoder requires a compatible FFmpeg build, hardware and driver. In the output of `.\Layer.cmd doctor`, `hardware_h264` reports which hardware encoders passed the probe and `encoders` lists the ones compiled into FFmpeg.
 
 | GSR record or replay format | Requirements |
 | --- | --- |
@@ -182,6 +182,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 
 - The [Windows workflow for the original Voice Control commit](https://github.com/miruas/layer-recorder-windows/actions/runs/43735470674) passed. It ran capture, Voice Control, native Studio and GSR overlay checks, verified the portable ZIP and built the x64 installer. The matching [test and package workflow](https://github.com/miruas/layer-recorder-windows/actions/runs/43735470613) also passed.
 - On the development PC, 34 Windows tests passed and one shortcut test was skipped because a running Layer instance already owned a binding. Native Windows capture testing exercised physical 1920×1080 capture, software H.264, NVIDIA NVENC and WASAPI system, microphone and application audio. Synthetic tests cover independent tracks, reconnects and timeline behavior.
+- The AMD Radeon device passed the AMF H.264 startup probe and produced a recording and a two-second replay through the Rust capture engine, both with synthetic video and while capturing a real 320×240 Windows test window through GDI. Automatic selection chose AMF when the test excluded NVENC. The updated Windows suite passed all 36 tests, including shortcut registration.
 - Voice checks covered command add/edit/delete in the dialog, live WASAPI microphone open and release, and synthesized English input for the `Kivo` examples, including 180-, 30- and 135-second replay requests. Recording, replay and export regressions also passed with the listener active. In a quiet 10-second Razer Barracuda X test, the listener used approximately 0.47% of one CPU core and performed no speech decoding. This is an idle sample from one machine.
 - Local receiver tests covered WHIP video/audio and session termination, RTMP/FLV, fragmented MP4 and MPEG-TS over TCP, and HLS over HTTP PUT. See the [GSR port notes](https://github.com/miruas/layer-recorder-windows/blob/voice-control/docs/GSR_WINDOWS_PORT.md).
 
@@ -191,7 +192,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | --- | --- |
 | Overlay coverage | The overlay is available over the desktop and borderless windows. Exclusive fullscreen can bypass desktop composition. Test shortcut ownership and behavior on the target game. |
 | Linux parity | Camera capture integration, inverted GSR application audio, and mixing multiple inputs into a single GSR recording track remain open. Windows uses its own capture and audio APIs. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
-| GPU coverage | Physical AMD AMF, Intel Quick Sync, multi-monitor and mixed-DPI validation is pending. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
+| GPU coverage | AMD AMF recording and replay were tested on a real Windows window and with synthetic video. Full-display and gameplay testing on AMD, physical Intel Quick Sync, multi-monitor and mixed-DPI validation remain open. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
 | Audio timing | Independently launched media producers have approximate start alignment. Broad device and workload testing for latency, drift and sync remains pending. |
 | Replay transitions | Standalone replay must be stopped before normal recording starts. Transitioning while preserving the existing replay history remains open. Effective duration is constrained by the RAM budget and retained video. |
 | Voice field testing | Language support is English. The current wake phrase match follows voice-activity-gated transcription. Live-speaker accuracy across voices, accents, microphones and gameplay noise, along with false-trigger rates and in-game FPS and audio-sync impact, has not been systematically measured. |

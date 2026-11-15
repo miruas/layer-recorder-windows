@@ -18,7 +18,8 @@ from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, dxgi_targets, foreground_window, recording_container, video_color_range,
     ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
-    GSR_NVENC_RECORDING_CODECS, gsr_frame_rate, gsr_recording_encoder, gsr_ten_bit, nvenc_available, video_framerate_mode,
+    GSR_NVENC_RECORDING_CODECS, H264_HARDWARE_ENCODERS, gsr_frame_rate, gsr_recording_encoder, gsr_ten_bit,
+    video_encoder_available, video_framerate_mode,
     video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
@@ -926,8 +927,8 @@ def capture_controls(library, *, background=False):
 
     def detect_recording_codecs():
         for codec, encoder in GSR_NVENC_RECORDING_CODECS.items():
-            nvenc_recording_support[codec] = nvenc_available(encoder)
-            nvenc_recording_support[f"{codec}_10bit"] = nvenc_available(encoder, ten_bit=True)
+            nvenc_recording_support[codec] = video_encoder_available(encoder)
+            nvenc_recording_support[f"{codec}_10bit"] = video_encoder_available(encoder, ten_bit=True)
 
     threading.Thread(target=detect_recording_codecs, daemon=True).start()
 
@@ -1025,13 +1026,15 @@ def main():
                         compiled = names
                         available = [encoder for encoder in ENCODERS if encoder in names]
             engine = capture_binary()
-            nvenc = {}
-            for codec, encoder in {"h264": "h264_nvenc", **GSR_NVENC_RECORDING_CODECS}.items():
-                nvenc[codec] = encoder in compiled and nvenc_available(encoder)
-                if codec in GSR_NVENC_RECORDING_CODECS:
-                    nvenc[f"{codec}_10bit"] = nvenc[codec] and nvenc_available(encoder, ten_bit=True)
+            hardware_h264 = {encoder: encoder in compiled and video_encoder_available(encoder)
+                             for encoder in H264_HARDWARE_ENCODERS}
+            nvenc = {"h264": hardware_h264["h264_nvenc"]}
+            for codec, encoder in GSR_NVENC_RECORDING_CODECS.items():
+                nvenc[codec] = encoder in compiled and video_encoder_available(encoder)
+                nvenc[f"{codec}_10bit"] = nvenc[codec] and video_encoder_available(encoder, ten_bit=True)
             print(json.dumps({**paths, "capture_engine": str(engine) if engine.is_file() else None,
                               "gdigrab": capture_available, "encoders": available,
+                              "hardware_h264": hardware_h264,
                               "nvenc": nvenc, "dxgi_outputs": dxgi_targets() if engine.is_file() else {},
                               "displays": [asdict(display) for display in displays()]}, indent=2))
             if not engine.is_file() or not all(paths.values()) or not capture_available or "libx264" not in available:
