@@ -11,7 +11,7 @@ from .windows_capture import (
     set_capture_cursor, set_video_color_range,
     set_video_framerate_mode, set_video_rate_control,
 )
-from .windows_audio import AUDIO_TIMESCALE, CHANNELS, capture_pcm, gsr_audio_selection, mix_audio
+from .windows_audio import AUDIO_TIMESCALE, CHANNELS, capture_pcm, gsr_audio_selection, mix_audio, mix_live_audio
 
 
 @dataclass(frozen=True)
@@ -84,10 +84,13 @@ def stream_frame_rate(settings):
     return gsr_frame_rate(settings.get("record_options"))
 
 
-def stream_audio_sources(settings, inventory):
+def stream_audio_tracks(settings):
     options = settings.get("record_options") or {}
-    tracks = options.get("audio_track_item", [{"audio_inputs": ["default_output"]}])
-    sources = gsr_audio_selection(tracks, inventory)
+    return options.get("audio_track_item", [{"audio_inputs": ["default_output"]}])
+
+
+def stream_audio_sources(tracks, inventory, *, allow_missing=False):
+    sources = gsr_audio_selection(tracks, inventory, allow_missing=allow_missing)
     if any(track.get("application_audio_invert") for track in tracks) and any(
             source.kind == "system" for source in sources):
         raise ValueError("Remove system output from the livestream to exclude application audio.")
@@ -128,13 +131,13 @@ def stream_video_command(display, fps, encoder, resolution, cursor, color_range,
 
 class Livestream:
     def __init__(self, display, fps, encoder, destination, audio=(), *, resolution=None, cursor=None,
-                 color_range=None, rate_control=None, framerate_mode=None, webcam=None):
+                 color_range=None, rate_control=None, framerate_mode=None, webcam=None, discover_audio=None):
         whip = isinstance(destination, WhipDestination)
         command = stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control,
                                        framerate_mode, webcam)
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
-        if audio:
+        if audio or discover_audio is not None:
             maps = ["-map", "0:v:0", "-map", "1:a:0"]
             if webcam is not None:
                 maps = ["-map", "2:a:0"]
@@ -175,14 +178,16 @@ class Livestream:
             command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        if audio:
-            self.audio_thread = threading.Thread(target=self._feed_audio, args=(audio,), daemon=True)
+        if audio or discover_audio is not None:
+            self.audio_thread = threading.Thread(target=self._feed_audio, args=(audio, discover_audio), daemon=True)
             self.audio_thread.start()
 
-    def _feed_audio(self, sources):
+    def _feed_audio(self, sources, discover):
         try:
             with self.process.stdin as output:
-                if len(sources) == 1:
+                if discover is not None:
+                    mix_live_audio(sources, discover, output, self.audio_stop, self._audio_warning)
+                elif len(sources) == 1:
                     capture_pcm(sources[0], output, self.audio_stop)
                 else:
                     mix_audio(sources, output, self.audio_stop)
@@ -190,6 +195,9 @@ class Livestream:
             pass
         except Exception as error:
             self.audio_error = str(error)
+
+    def _audio_warning(self, message):
+        self.audio_error = message
 
     def poll(self):
         return self.process.poll()

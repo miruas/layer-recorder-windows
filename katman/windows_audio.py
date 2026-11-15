@@ -582,23 +582,48 @@ def play_pcm(stream, ready, closed):
 AUDIO_ENCODERS = {"aac": "aac", "opus": "libopus"}
 
 
-def mix_audio(sources, output, stop):
-    block_size = AUDIO_TIMESCALE // 50 * FRAME_BYTES
-    errors = Queue()
+AUDIO_BLOCK = AUDIO_TIMESCALE // 50 * FRAME_BYTES
 
-    class Input:
-        def __init__(self):
-            self.blocks = Queue(maxsize=25)
-            self.pending = bytearray()
 
-        def write(self, data):
-            self.pending.extend(data)
-            while len(self.pending) >= block_size and not stop.is_set():
-                try:
-                    self.blocks.put(bytes(self.pending[:block_size]), timeout=.1)
-                except Full:
+class PCMInput:
+    def __init__(self, stop, *, realtime=False):
+        self.stop = stop
+        self.realtime = realtime
+        self.blocks = Queue(maxsize=5 if realtime else 25)
+        self.pending = bytearray()
+
+    def write(self, data):
+        self.pending.extend(data)
+        while len(self.pending) >= AUDIO_BLOCK and not self.stop.is_set():
+            block = bytes(self.pending[:AUDIO_BLOCK])
+            try:
+                self.blocks.put(block, block=not self.realtime, timeout=.1)
+            except Full:
+                if not self.realtime:
                     continue
-                del self.pending[:block_size]
+                # The publishing clock has already passed older queued audio.
+                try:
+                    self.blocks.get_nowait()
+                except Empty:
+                    pass
+                continue
+            del self.pending[:AUDIO_BLOCK]
+
+
+def sum_pcm(blocks):
+    if not blocks:
+        return bytes(AUDIO_BLOCK)
+    if len(blocks) == 1:
+        return blocks[0]
+    mixed = [0] * (AUDIO_BLOCK // 2)
+    for block in blocks:
+        for index, sample in enumerate(array("h", block)):
+            mixed[index] += sample
+    return array("h", (max(-32768, min(32767, sample)) for sample in mixed)).tobytes()
+
+
+def mix_audio(sources, output, stop):
+    errors = Queue()
 
     def read(source, sink):
         try:
@@ -609,14 +634,14 @@ def mix_audio(sources, output, stop):
             errors.put(error)
             stop.set()
 
-    inputs = [Input() for _ in sources]
+    inputs = [PCMInput(stop) for _ in sources]
     readers = [threading.Thread(target=read, args=(source, sink), daemon=True)
                for source, sink in zip(sources, inputs)]
     for reader in readers:
         reader.start()
     try:
         while not stop.is_set():
-            mixed = [0] * (block_size // 2)
+            blocks = []
             for source, sink in zip(sources, inputs):
                 deadline = time.monotonic() + 3
                 while not stop.is_set():
@@ -626,18 +651,85 @@ def mix_audio(sources, output, stop):
                         if time.monotonic() >= deadline:
                             raise RuntimeError(f"{source.name}: Windows audio capture stopped responding.")
                         continue
-                    # Both WASAPI and the Windows encoder use little-endian PCM.
-                    for index, sample in enumerate(array("h", block)):
-                        mixed[index] += sample
+                    blocks.append(block)
                     break
             if not stop.is_set():
-                output.write(array("h", (max(-32768, min(32767, sample)) for sample in mixed)).tobytes())
+                output.write(sum_pcm(blocks))
         if not errors.empty():
             raise errors.get()
     finally:
         stop.set()
         for reader in readers:
             reader.join(timeout=2)
+
+
+def mix_live_audio(initial, discover, output, stop, warn, *, interval=1.0):
+    """Keep a fixed-rate PCM pipe while the eligible WASAPI sources change."""
+    active = {}
+    retired = []
+    retry_at = {}
+    lock = threading.Lock()
+    desired = tuple(initial)
+
+    def refresh():
+        nonlocal desired
+        while not stop.wait(interval):
+            try:
+                found = tuple(discover())
+            except (OSError, RuntimeError, ValueError) as error:
+                warn(str(error))
+                found = ()
+            with lock:
+                desired = found
+
+    def read(source, sink, halted):
+        try:
+            capture_pcm(source, sink, halted)
+        except (OSError, RuntimeError) as error:
+            if not halted.is_set():
+                warn(f"{source.name}: {error}")
+
+    inventory = threading.Thread(target=refresh, daemon=True)
+    inventory.start()
+    deadline = time.monotonic()
+    try:
+        while not stop.is_set():
+            with lock:
+                sources = desired
+            now = time.monotonic()
+            for source, (halted, reader, _) in tuple(active.items()):
+                if source not in sources or not reader.is_alive():
+                    halted.set()
+                    retired.append(reader)
+                    del active[source]
+                    retry_at[source] = now + interval
+            retry_at = {source: when for source, when in retry_at.items() if source in sources and when > now}
+            for source in sources:
+                if source in active or source in retry_at:
+                    continue
+                halted = threading.Event()
+                sink = PCMInput(halted, realtime=True)
+                reader = threading.Thread(target=read, args=(source, sink, halted), daemon=True)
+                active[source] = halted, reader, sink
+                reader.start()
+            retired = [reader for reader in retired if reader.is_alive()]
+            blocks = []
+            for _, _, sink in active.values():
+                try:
+                    blocks.append(sink.blocks.get_nowait())
+                except Empty:
+                    pass
+            output.write(sum_pcm(blocks))
+            deadline = max(deadline + .02, time.monotonic())
+            stop.wait(max(0, deadline - time.monotonic()))
+    finally:
+        stop.set()
+        for halted, reader, _ in active.values():
+            halted.set()
+            retired.append(reader)
+        for reader in retired:
+            reader.join(timeout=2)
+        inventory.join(timeout=2)
 
 
 def capture_audio_command(source, codec="aac"):

@@ -19,6 +19,7 @@ from katman.windows_capture import (
 )
 from katman.windows_audio import (
     AudioSource, audio_encoder_command, capture_audio_command, gsr_audio_selection, gsr_recording_audio, mix_audio,
+    mix_live_audio,
 )
 from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
 from katman.windows_screenshot import capture_monitor, screenshot_source
@@ -26,6 +27,52 @@ from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 
 
 class ReplayTests(unittest.TestCase):
+    def test_live_audio_keeps_pcm_running_through_empty_and_replaced_sessions(self):
+        from struct import pack
+
+        first = AudioSource("app:101", "Game", "application", pid=101)
+        second = AudioSource("app:102", "Game", "application", pid=102)
+        stop = threading.Event()
+        received = []
+        sources = []
+
+        def capture(source, sink, halted):
+            while not halted.is_set():
+                sink.write(pack("<h", source.pid) * 1920)
+                halted.wait(.020)
+
+        def discover():
+            return list(sources)
+
+        class Output:
+            def write(self, data):
+                received.append(int.from_bytes(data[:2], "little"))
+                if len(received) == 3:
+                    sources[:] = [first]
+                if received.count(101) == 3:
+                    sources[:] = [second]
+                if received.count(102) == 3 or len(received) >= 60:
+                    stop.set()
+
+        with patch("katman.windows_audio.capture_pcm", side_effect=capture):
+            mix_live_audio([], discover, Output(), stop, self.fail, interval=.05)
+        self.assertEqual(received[:3], [0, 0, 0])
+        self.assertIn(101, received)
+        self.assertIn(102, received)
+        self.assertNotIn(101, received[received.index(102):])
+
+    def test_live_application_stream_includes_audio_even_without_an_initial_session(self):
+        with (patch.object(subprocess, "CREATE_NO_WINDOW", 0, create=True),
+              patch("katman.windows_stream.subprocess.Popen") as start,
+              patch("katman.windows_stream.threading.Thread", return_value=Mock()) as thread):
+            discover = Mock(return_value=[])
+            Livestream(Display("Fixture", 0, 0, 320, 240), 30, "libx264",
+                       CustomDestination("test.mp4", "mp4"), discover_audio=discover)
+        args = start.call_args.args[0]
+        self.assertIn("1:a:0", args)
+        self.assertIn("pipe:0", args)
+        self.assertEqual(thread.call_args.kwargs["args"], ((), discover))
+
     def test_inverted_gsr_audio_excludes_named_process_trees_without_duplicate_mixes(self):
         from katman.windows_audio import inverse_application_audio
 

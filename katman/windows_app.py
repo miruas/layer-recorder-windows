@@ -520,18 +520,31 @@ def capture_controls(library, *, background=False):
             show()
 
     def launch_stream(source, rate, destination, settings):
-        from .windows_stream import Livestream, stream_audio_sources
+        from .windows_stream import Livestream, stream_audio_sources, stream_audio_tracks
 
         codec = encoder.get()
         status.set("Starting livestream…")
 
         def publish():
-            audio = stream_audio_sources(settings, read_audio_inventory())
+            tracks = stream_audio_tracks(settings)
+            inventory = read_audio_inventory()
+            # Validate the configuration before inspecting its track fields.
+            audio = stream_audio_sources(tracks, inventory, allow_missing=True)
+            follow = any(track.get("application_audio_invert") or any(
+                isinstance(item, str) and item.casefold().startswith("app:") for item in track["audio_inputs"]
+            ) for track in tracks)
+            if not follow:
+                audio = stream_audio_sources(tracks, inventory)
+
+            def discover_audio():
+                return stream_audio_sources(tracks, read_audio_inventory(), allow_missing=True)
+
             options = settings.get("record_options")
             return Livestream(source, rate, gsr_h264_encoder(options, codec), destination, audio,
                               resolution=video_resolution(options), cursor=video_cursor(options),
                               color_range=video_color_range(options), rate_control=video_rate_control(options),
-                              framerate_mode=video_framerate_mode(options), webcam=gsr_webcam(options))
+                              framerate_mode=video_framerate_mode(options), webcam=gsr_webcam(options),
+                              discover_audio=discover_audio if follow else None)
 
         submit("stream_start", publish)
 
