@@ -31,6 +31,11 @@ foreach ($codec in 'hevc', 'av1', 'hevc_10bit', 'av1_10bit') {
     $settingsCode = $settingsCode.Replace("if(gsr_info->supported_video_codecs.$codec)",
         "if(type != Type::STREAM && gsr_info->supported_video_codecs.$codec)")
 }
+foreach ($device in 'device_name', 'audio_input') {
+    $selection = "audio_device_box->set_selected_item($device);"
+    $settingsCode = $settingsCode.Replace($selection,
+        "audio_device_box->add_item(TR(`"Disconnected audio device`"), $device, false);`n                    $selection")
+}
 Set-Content -LiteralPath $settingsPage -Value $settingsCode -Encoding utf8
 $includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port", "-I$build")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }

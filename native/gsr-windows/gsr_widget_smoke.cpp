@@ -70,6 +70,8 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
         gsr::get_application_audio() != std::vector<std::string>{"game.exe"})
         return false;
     info.system_info.supports_app_audio = true;
+    const std::vector<std::string> saved_inputs = {"device:system:disconnected.monitor", "app:offline.exe"};
+    config.record_config.record_options.audio_tracks_list = {{"", saved_inputs, false}};
     gsr::PageStack stack;
     using Type = gsr::SettingsPage::Type;
     for (auto type : {Type::RECORD, Type::REPLAY, Type::STREAM}) {
@@ -77,7 +79,8 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
         stack.draw(window, {0, 0});
         stack.pop();
     }
-    return stack.empty();
+    const auto &saved_tracks = config.record_config.record_options.audio_tracks_list;
+    return stack.empty() && saved_tracks.size() == 1 && saved_tracks.front().audio_inputs == saved_inputs;
 }
 
 static int test(const std::string &resources) {
