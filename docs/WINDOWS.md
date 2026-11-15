@@ -60,7 +60,7 @@ For GSR **Auto** and **H.264**, Layer tries NVIDIA NVENC, AMD AMF and Intel Quic
 
 Layer tries Desktop Duplication for compatible NVENC display or region capture. It uses GDI for cases including rotated displays, resizing, and explicit limited-range conversion, or when Desktop Duplication is unavailable. NVENC can still encode GDI frames. **Sync to content** uses GDI and keeps a low-rate heartbeat on static screens so replay time continues advancing. The Desktop Duplication profile caps video peak bitrate at 11 Mb/s per track.
 
-GSR audio codec selection applies to independent recording and replay audio tracks. A replay made during a recording shares its encoded tracks. MOV and FLV output convert Opus audio to AAC when needed.
+GSR audio codec selection applies to recording and replay audio tracks. Add multiple inputs to a single GSR audio track to mix them into one project track. Add separate GSR tracks to keep their audio independently editable. If one track contains both a system mix and an application, Layer uses the system mix to avoid doubling the application audio. A replay made during a recording shares its encoded tracks. MOV and FLV output convert Opus audio to AAC when needed.
 
 ## Voice Control
 
@@ -185,13 +185,14 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 - The AMD Radeon device passed the AMF H.264 startup probe and produced a recording and a two-second replay through the Rust capture engine, both with synthetic video and while capturing a real 320×240 Windows test window through GDI. Automatic selection chose AMF when the test excluded NVENC. The updated Windows suite passed all 36 tests, including shortcut registration.
 - Voice checks covered command add/edit/delete in the dialog, live WASAPI microphone open and release, and synthesized English input for the `Kivo` examples, including 180-, 30- and 135-second replay requests. Recording, replay and export regressions also passed with the listener active. In a quiet 10-second Razer Barracuda X test, the listener used approximately 0.47% of one CPU core and performed no speech decoding. This is an idle sample from one machine.
 - Local receiver tests covered WHIP video/audio and session termination, RTMP/FLV, fragmented MP4 and MPEG-TS over TCP, and HLS over HTTP PUT. See the [GSR port notes](https://github.com/miruas/layer-recorder-windows/blob/voice-control/docs/GSR_WINDOWS_PORT.md).
+- A Windows test using two live WASAPI output endpoints grouped into one named GSR track produced a stereo AAC track in both a recording and a two-second replay. Mixer tests verify sample addition, clipping, and track identity when an input disconnects.
 
 ### Remaining gaps and validation
 
 | Area | Current limitation or open verification |
 | --- | --- |
 | Overlay coverage | The overlay is available over the desktop and borderless windows. Exclusive fullscreen can bypass desktop composition. Test shortcut ownership and behavior on the target game. |
-| Linux parity | Camera capture integration, inverted GSR application audio, and mixing multiple inputs into a single GSR recording track remain open. Windows uses its own capture and audio APIs. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
+| Linux parity | Camera capture integration and inverted GSR application audio remain open. Windows uses its own capture and audio APIs. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
 | GPU coverage | AMD AMF recording and replay were tested on a real Windows window and with synthetic video. Full-display and gameplay testing on AMD, physical Intel Quick Sync, multi-monitor and mixed-DPI validation remain open. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
 | Audio timing | Independently launched media producers have approximate start alignment. Broad device and workload testing for latency, drift and sync remains pending. |
 | Replay transitions | Standalone replay must be stopped before normal recording starts. Transitioning while preserving the existing replay history remains open. Effective duration is constrained by the RAM budget and retained video. |

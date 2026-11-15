@@ -3,7 +3,6 @@
 import subprocess
 import threading
 import time
-from queue import Empty, Full, Queue
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
@@ -12,7 +11,7 @@ from .windows_capture import (
     set_capture_cursor, set_video_color_range,
     set_video_framerate_mode, set_video_rate_control,
 )
-from .windows_audio import AUDIO_TIMESCALE, CHANNELS, FRAME_BYTES, capture_pcm, gsr_audio_selection
+from .windows_audio import AUDIO_TIMESCALE, CHANNELS, capture_pcm, gsr_audio_selection, mix_audio
 
 
 @dataclass(frozen=True)
@@ -89,64 +88,6 @@ def stream_audio_sources(settings, inventory):
     options = settings.get("record_options") or {}
     tracks = options.get("audio_track_item", [{"audio_inputs": ["default_output"]}])
     return gsr_audio_selection(tracks, inventory)
-
-
-def mix_audio(sources, output, stop):
-    import numpy as np
-
-    block_size = AUDIO_TIMESCALE // 50 * FRAME_BYTES
-    errors = Queue()
-
-    class Input:
-        def __init__(self):
-            self.blocks = Queue(maxsize=25)
-            self.pending = bytearray()
-
-        def write(self, data):
-            self.pending.extend(data)
-            while len(self.pending) >= block_size and not stop.is_set():
-                try:
-                    self.blocks.put(bytes(self.pending[:block_size]), timeout=.1)
-                except Full:
-                    continue
-                del self.pending[:block_size]
-
-    def read(source, sink):
-        try:
-            capture_pcm(source, sink, stop)
-            if not stop.is_set():
-                raise RuntimeError(f"{source.name}: Windows audio capture ended.")
-        except Exception as error:
-            errors.put(error)
-            stop.set()
-
-    inputs = [Input() for _ in sources]
-    readers = [threading.Thread(target=read, args=(source, sink), daemon=True)
-               for source, sink in zip(sources, inputs)]
-    for reader in readers:
-        reader.start()
-    try:
-        while not stop.is_set():
-            mixed = np.zeros(block_size // 2, dtype=np.int32)
-            for source, sink in zip(sources, inputs):
-                deadline = time.monotonic() + 3
-                while not stop.is_set():
-                    try:
-                        block = sink.blocks.get(timeout=.1)
-                    except Empty:
-                        if time.monotonic() >= deadline:
-                            raise RuntimeError(f"{source.name}: Windows audio capture stopped responding.")
-                        continue
-                    mixed += np.frombuffer(block, dtype="<i2")
-                    break
-            if not stop.is_set():
-                output.write(mixed.clip(-32768, 32767).astype("<i2").tobytes())
-        if not errors.empty():
-            raise errors.get()
-    finally:
-        stop.set()
-        for reader in readers:
-            reader.join(timeout=2)
 
 
 def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode):

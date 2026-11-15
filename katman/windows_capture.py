@@ -707,10 +707,9 @@ class Capture:
                            if track.kind == "audio")
         else:
             if self.gsr_audio_tracks is not None:
-                from .windows_audio import gsr_audio_selection
-                selected_audio = gsr_audio_selection(self.gsr_audio_tracks, current_audio, allow_missing=True)
-                if any(source.kind == "system" for source in selected_audio):
-                    selected_audio = [source for source in selected_audio if source.kind != "application"]
+                from .windows_audio import gsr_recording_audio
+                selected_audio = gsr_recording_audio(self.gsr_audio_tracks, current_audio)
+                self.audio = {source.key: source for source in selected_audio}
             else:
                 selected_audio = [source for source in current_audio if source.key in self.audio or
                                   (self.follow_application_audio and source.kind == "application")]

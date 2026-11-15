@@ -88,9 +88,9 @@ a recording region, and Shift+Alt+F10 toggles Instant Replay. Alt+F10,
 Alt+F11 and Alt+F12 save the full, short and long replay, respectively.
 Win+Alt+Z opens Layer Studio.
 The original settings list Windows audio endpoints and active applications
-from WASAPI. Record and Replay use the selected sources as independent Layer
-tracks. Inverted application audio, mixing multiple sources into one GSR
-track and other capture options still need integration.
+from WASAPI. Record and Replay produce one Layer audio track for each GSR
+track. The shared PCM mixer combines multiple inputs selected within a
+track. Inverted application audio still needs integration.
 Alt+F7 and the Record menu pause and resume recording. Resume starts new
 media segments, and the recording timeline excludes the paused interval.
 The Livestream card and Alt+F8 start or stop video publishing over RTMP or

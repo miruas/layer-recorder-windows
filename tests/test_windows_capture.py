@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import os
+import io
+import json
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import Mock, call, patch
@@ -14,12 +17,53 @@ from katman.windows_capture import (
     Capture, Display, capture_binary, capture_command, desktop_duplication_command, dxgi_targets, gsr_h264_encoder,
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
-from katman.windows_audio import AudioSource, audio_encoder_command, gsr_audio_selection
+from katman.windows_audio import (
+    AudioSource, audio_encoder_command, capture_audio_command, gsr_audio_selection, gsr_recording_audio, mix_audio,
+)
 from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
 from katman.windows_screenshot import capture_monitor, screenshot_source
 
 
 class ReplayTests(unittest.TestCase):
+    def test_gsr_mixes_inputs_per_track_and_keeps_the_track_key_on_disconnect(self):
+        mic = AudioSource("microphone:mic", "Microphone", "microphone", "mic")
+        speaker = AudioSource("system:speaker", "Speakers", "system", "speaker", default=True)
+        app = AudioSource("app:7", "game.exe (PID 7)", "application", pid=7)
+        tracks = [
+            {"audio_inputs": ["device:default_output", "device:microphone:mic"], "name": "Commentary"},
+            {"audio_inputs": ["app:game.exe"], "name": "Game"},
+        ]
+        mixed, game = gsr_recording_audio(tracks, [mic, speaker, app])
+        self.assertEqual(mixed.metadata["name"], "Commentary")
+        self.assertEqual(game.key, app.key)
+        command = capture_audio_command(mixed)
+        self.assertEqual(command[-3], "mix")
+        self.assertEqual(json.loads(command[-2]), [["microphone", "mic", 0], ["system", "speaker", 0]])
+        shrunk, = gsr_recording_audio(tracks, [speaker])
+        self.assertEqual(shrunk.key, mixed.key)
+        self.assertEqual([source.key for source in shrunk.inputs], [speaker.key])
+
+    def test_pcm_mixer_sums_sources_and_clips_instead_of_wrapping(self):
+        from struct import pack
+
+        sources = [AudioSource("first", "First", "microphone"), AudioSource("second", "Second", "microphone")]
+        stop = threading.Event()
+
+        class Output(io.BytesIO):
+            def write(self, data):
+                super().write(data)
+                stop.set()
+
+        def capture_block(source, sink, halted):
+            sample = 20000 if source.key == "first" else 16000
+            sink.write(pack("<hh", sample, -sample) * 960)
+            halted.wait(2)
+
+        output = Output()
+        with patch("katman.windows_audio.capture_pcm", side_effect=capture_block):
+            mix_audio(sources, output, stop)
+        self.assertEqual(output.getvalue(), pack("<hh", 32767, -32768) * 960)
+
     def test_gsr_unsupported_codec_does_not_silently_encode_h264(self):
         with patch("katman.windows_capture.video_encoder_available") as available:
             with self.assertRaisesRegex(ValueError, "configured video codec is unavailable"):
@@ -68,6 +112,9 @@ class ReplayTests(unittest.TestCase):
                 self.assertEqual(set(capture.active), {display.key, restarted.key})
                 self.assertTrue(next(track for track in capture.tracks if track.source.key == first.key).stopped)
                 self.assertEqual(capture.active[restarted.key].source.metadata["name"], "Game audio")
+                capture.reconcile([display], [other])
+                capture.reconcile([display], None)
+                self.assertEqual(set(capture.active), {display.key})
             finally:
                 capture.stop()
 

@@ -1,10 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """WASAPI endpoint and process-loopback audio for the Windows recorder."""
+from array import array
 from contextlib import ExitStack, contextmanager
 import ctypes as c
 from ctypes import wintypes as w
 from dataclasses import dataclass, replace
+import json
 from pathlib import Path
+from queue import Empty, Full, Queue
 import os
 import subprocess
 import sys
@@ -27,6 +30,7 @@ class AudioSource:
     pid: int = 0
     default: bool = False
     track_name: str = ""
+    inputs: tuple["AudioSource", ...] = ()
 
     @property
     def metadata(self):
@@ -322,6 +326,29 @@ def gsr_audio_selection(tracks, sources, *, allow_missing=False):
     return selected
 
 
+def gsr_recording_audio(tracks, sources):
+    """Resolve each GSR track independently and keep its key across input changes."""
+    if not isinstance(tracks, list):
+        raise ValueError("Invalid audio tracks in the GSR configuration.")
+    selected = {}
+    for index, track in enumerate(tracks):
+        inputs = gsr_audio_selection([track], sources, allow_missing=True)
+        if not inputs:
+            continue
+        if any(source.kind == "system" for source in inputs):
+            # The system mix already contains the selected application's audio.
+            inputs = [source for source in inputs if source.kind != "application"]
+        if len(track["audio_inputs"]) == 1 and len(inputs) == 1:
+            source = inputs[0]
+            if source.key not in selected:
+                selected[source.key] = source
+                continue
+        name = inputs[0].track_name or " + ".join(source.name for source in inputs)
+        source = AudioSource(f"gsr-track:{index}", name, "mix", inputs=tuple(inputs))
+        selected[source.key] = source
+    return list(selected.values())
+
+
 def process_audio_client(stack, pid):
     callback = c.WINFUNCTYPE(HR, PTR, PTR)
     query = c.WINFUNCTYPE(HR, PTR, c.POINTER(GUID), c.POINTER(PTR))
@@ -519,10 +546,71 @@ def play_pcm(stream, ready, closed):
 AUDIO_ENCODERS = {"aac": "aac", "opus": "libopus"}
 
 
+def mix_audio(sources, output, stop):
+    block_size = AUDIO_TIMESCALE // 50 * FRAME_BYTES
+    errors = Queue()
+
+    class Input:
+        def __init__(self):
+            self.blocks = Queue(maxsize=25)
+            self.pending = bytearray()
+
+        def write(self, data):
+            self.pending.extend(data)
+            while len(self.pending) >= block_size and not stop.is_set():
+                try:
+                    self.blocks.put(bytes(self.pending[:block_size]), timeout=.1)
+                except Full:
+                    continue
+                del self.pending[:block_size]
+
+    def read(source, sink):
+        try:
+            capture_pcm(source, sink, stop)
+            if not stop.is_set():
+                raise RuntimeError(f"{source.name}: Windows audio capture ended.")
+        except Exception as error:
+            errors.put(error)
+            stop.set()
+
+    inputs = [Input() for _ in sources]
+    readers = [threading.Thread(target=read, args=(source, sink), daemon=True)
+               for source, sink in zip(sources, inputs)]
+    for reader in readers:
+        reader.start()
+    try:
+        while not stop.is_set():
+            mixed = [0] * (block_size // 2)
+            for source, sink in zip(sources, inputs):
+                deadline = time.monotonic() + 3
+                while not stop.is_set():
+                    try:
+                        block = sink.blocks.get(timeout=.1)
+                    except Empty:
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError(f"{source.name}: Windows audio capture stopped responding.")
+                        continue
+                    # Both WASAPI and the Windows encoder use little-endian PCM.
+                    for index, sample in enumerate(array("h", block)):
+                        mixed[index] += sample
+                    break
+            if not stop.is_set():
+                output.write(array("h", (max(-32768, min(32767, sample)) for sample in mixed)).tobytes())
+        if not errors.empty():
+            raise errors.get()
+    finally:
+        stop.set()
+        for reader in readers:
+            reader.join(timeout=2)
+
+
 def capture_audio_command(source, codec="aac"):
     executable = Path(sys.executable)
     if executable.name.lower() == "pythonw.exe":
         executable = executable.with_name("python.exe")
+    if source.inputs:
+        inputs = [[item.kind, item.endpoint, item.pid] for item in source.inputs]
+        return [str(executable), "-m", "katman.windows_audio", "mix", json.dumps(inputs), codec]
     return [str(executable), "-m", "katman.windows_audio", "capture",
             source.kind, source.endpoint, str(source.pid), codec]
 
@@ -599,7 +687,10 @@ def capture(source, codec="aac"):
         try:
             attach(process.pid)
             with process.stdin as output:
-                capture_pcm(source, output, stop)
+                if len(source.inputs) > 1:
+                    mix_audio(source.inputs, output, stop)
+                else:
+                    capture_pcm(source.inputs[0] if source.inputs else source, output, stop)
             return process.wait(timeout=5)
         finally:
             if process.poll() is None:
@@ -612,8 +703,11 @@ def main():
     if command == "capture":
         kind, endpoint, pid, *codec = args
         return capture(AudioSource("", "", kind, endpoint, int(pid)), *codec)
+    if command == "mix":
+        inputs, codec = args
+        sources = tuple(AudioSource("", kind, kind, endpoint, pid) for kind, endpoint, pid in json.loads(inputs))
+        return capture(AudioSource("", "", "mix", inputs=sources), codec)
     if command == "devices":
-        import json
         print(json.dumps([{"key": source.key, "name": source.name, "endpoint": source.endpoint}
                           for source in audio_sources() if source.kind == "microphone"]))
         return 0

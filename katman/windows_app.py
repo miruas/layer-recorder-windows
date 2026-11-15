@@ -410,18 +410,18 @@ def capture_controls(library, *, background=False):
         sources = [audio_options[index] for index in audio_select.curselection()]
         follow_audio = follow_apps.get() and not use_gsr
         if use_gsr:
-            from .windows_audio import gsr_audio_selection
+            from .windows_audio import gsr_recording_audio
 
             try:
                 inventory = read_audio_inventory()
                 if configured_tracks is None:
                     configured_tracks = [{"audio_inputs": ["default_output"]}]
-                sources = gsr_audio_selection(configured_tracks, inventory, allow_missing=True)
+                sources = gsr_recording_audio(configured_tracks, inventory)
             except (OSError, ValueError) as error:
                 status.set(str(error))
                 show()
                 return
-        if any(source.kind == "system" for source in sources) and (
+        if not use_gsr and any(source.kind == "system" for source in sources) and (
                 follow_audio or any(source.kind == "application" for source in sources)):
             status.set("Choose the system mix or separate applications to avoid duplicating playback audio.")
             return
