@@ -52,10 +52,37 @@ Filename: "{app}\Layer.exe"; Description: "Open Layer Recorder"; Flags: nowait p
 var
   DownloadPage: TDownloadWizardPage;
   InstallMedia: Boolean;
+  StartupTaskInitialized: Boolean;
+
+procedure RestoreStartupTask();
+var
+  I: Integer;
+  Argument: String;
+begin
+  if StartupTaskInitialized then exit;
+  StartupTaskInitialized := True;
+  if not FileExists(ExpandConstant('{app}\Layer.exe')) then exit;
+  for I := 1 to ParamCount do
+  begin
+    Argument := Lowercase(ParamStr(I));
+    if (Pos('/tasks=', Argument) = 1) or (Pos('/mergetasks=', Argument) = 1) or
+       (Pos('/loadinf=', Argument) = 1) then exit;
+  end;
+  if RegValueExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'LayerRecorder') then
+    WizardSelectTasks('startup')
+  else
+    WizardSelectTasks('!startup');
+end;
 
 procedure InitializeWizard();
 begin
   DownloadPage := CreateDownloadPage('Download media tools', 'Layer needs FFmpeg for capture and editing.', nil);
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpSelectTasks) and not WizardSilent then
+    RestoreStartupTask();
 end;
 
 function NeedsMedia(): Boolean;
@@ -66,6 +93,7 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+  RestoreStartupTask();
   InstallMedia := not FileExists(ExpandConstant('{app}\media-tools\ffmpeg-9.0.2-full_build\bin\ffmpeg.exe')) or
                   not FileExists(ExpandConstant('{app}\media-tools\ffmpeg-9.0.2-full_build\bin\ffprobe.exe'));
   if not InstallMedia then exit;

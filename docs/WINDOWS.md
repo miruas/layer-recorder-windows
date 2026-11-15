@@ -8,6 +8,8 @@ Download **Layer-Setup-x64.exe** from the **Layer-Setup-x64** artifact of a succ
 
 Setup offers an optional desktop shortcut, launch at sign-in, and an **Open with** entry for `.katman` projects. Closing the recorder window leaves it in the Windows notification area, where you can start or stop recording and replay, save recent footage, and open Studio. Select **Exit Layer** from that menu to finish capture and close the recorder. A second launch opens the existing recorder window. Use **Settings → Apps → Installed apps** to uninstall. Projects and user preferences are stored separately.
 
+On an upgrade, Setup uses the current launch-at-sign-in setting as its default. A silent upgrade keeps that setting unless the installer is given explicit task options.
+
 ## Capture and replay
 
 Choose the displays to capture. Select output devices for a system mix, microphones, or independent applications in the audio list. Use **Refresh audio** after an application starts playing. Enable **Include newly active applications** before recording to follow applications automatically. Choose either system audio or independent applications to avoid capturing the same playback twice. Application capture uses WASAPI process loopback and requires Windows build 20348 or later (Windows 11 on desktop).
