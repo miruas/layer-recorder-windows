@@ -190,7 +190,7 @@ def process_name(pid):
         kernel.CloseHandle(handle)
 
 
-def own_audio_processes():
+def process_snapshot():
     class ProcessEntry(c.Structure):
         _fields_ = [("size", U32), ("usage", U32), ("pid", U32),
                     ("heap", c.c_size_t), ("module", U32), ("threads", U32),
@@ -202,30 +202,38 @@ def own_audio_processes():
     kernel.CreateToolhelp32Snapshot.restype = w.HANDLE
     kernel.CloseHandle.argtypes = [w.HANDLE]
     snapshot = kernel.CreateToolhelp32Snapshot(2, 0)  # TH32CS_SNAPPROCESS
-    excluded = {os.getpid()}
+    processes = {}
     if snapshot == c.c_void_p(-1).value:
-        return excluded
+        return processes
     try:
         entry = ProcessEntry()
         entry.size = c.sizeof(entry)
         first, next_process = kernel.Process32FirstW, kernel.Process32NextW
         first.argtypes = next_process.argtypes = [w.HANDLE, c.POINTER(ProcessEntry)]
-        descendants = {}
         found = first(snapshot, c.byref(entry))
         while found:
-            descendants.setdefault(entry.parent, []).append(entry.pid)
-            if entry.executable.lower() == "layer-studio.exe":
-                excluded.add(entry.pid)
+            processes[entry.pid] = (entry.parent, entry.executable)
             found = next_process(snapshot, c.byref(entry))
-        pending = list(excluded)
-        while pending:
-            for child in descendants.get(pending.pop(), ()):
-                if child not in excluded:
-                    excluded.add(child)
-                    pending.append(child)
-        return excluded
+        return processes
     finally:
         kernel.CloseHandle(snapshot)
+
+
+def process_ancestors(pid, processes):
+    seen = {pid}
+    while pid in processes:
+        parent, _ = processes[pid]
+        if not parent or parent in seen:
+            return
+        yield parent
+        seen.add(parent)
+        pid = parent
+
+
+def own_audio_processes(processes):
+    excluded = {os.getpid()}
+    excluded.update(pid for pid, (_, name) in processes.items() if name.casefold() == "layer-studio.exe")
+    return excluded | {pid for pid in processes if excluded.intersection(process_ancestors(pid, processes))}
 
 
 def sessions(stack, endpoint):
@@ -251,7 +259,7 @@ def audio_sources():
         return []
     sources = []
     applications = {}
-    excluded = own_audio_processes()
+    excluded = own_audio_processes(process_snapshot())
     with com() as (ole, stack):
         devices = enumerator(ole, stack)
         default_output = ""
@@ -300,16 +308,26 @@ def gsr_audio_selection(tracks, sources, *, allow_missing=False):
     if not isinstance(tracks, list):
         raise ValueError("Invalid audio tracks in the GSR configuration.")
     wanted = {}
+    inverse = {}
     for track in tracks:
         if not isinstance(track, dict) or not isinstance(track.get("audio_inputs"), list):
             raise ValueError("Invalid audio track in the GSR configuration.")
-        if track.get("application_audio_invert"):
-            raise ValueError("Inverted application audio is unavailable on Windows.")
+        invert = bool(track.get("application_audio_invert"))
         name = track.get("name")
         name = name.strip() if isinstance(name, str) else ""
+        if invert:
+            exclusions = {item[4:].casefold().removesuffix(".exe") for item in track["audio_inputs"]
+                          if isinstance(item, str) and item.casefold().startswith("app:")}
+            for source in inverse_application_audio(sources, exclusions):
+                inverse.setdefault(source.key, replace(source, track_name=name))
         for item in track["audio_inputs"]:
             if isinstance(item, str):
                 identity = item.casefold()
+                if invert and identity.startswith("app:"):
+                    continue
+                if invert and (identity == "default_output" or identity.startswith("device:default_output")
+                               or identity.startswith("device:system:") or identity.endswith(".monitor")):
+                    raise ValueError("Remove system output from an inverted application audio track.")
                 wanted[identity] = wanted.get(identity) or name
     if "default_output" in wanted or "device:default_output" in wanted:
         default = next((source for source in sources if source.default), None)
@@ -323,7 +341,25 @@ def gsr_audio_selection(tracks, sources, *, allow_missing=False):
     missing = wanted.keys() - {gsr_audio_id(source).casefold() for source in selected}
     if missing and not allow_missing:
         raise ValueError("Some audio sources selected in GSR are unavailable. Review the capture settings.")
-    return selected
+    return list({**inverse, **{source.key: source for source in selected}}.values())
+
+
+def inverse_application_audio(sources, exclusions):
+    if not hasattr(sys, "getwindowsversion") or sys.getwindowsversion().build < PROCESS_LOOPBACK_BUILD:
+        raise ValueError("Inverted application audio requires Windows build 20348 or later.")
+    processes = process_snapshot()
+    blocked = own_audio_processes(processes)
+    blocked.update(pid for pid, (_, name) in processes.items()
+                   if name.casefold().removesuffix(".exe") in exclusions)
+    # WASAPI includes descendants of each selected process. Do not open a
+    # process tree that contains one of the excluded applications.
+    blocked_roots = {parent for pid in blocked for parent in process_ancestors(pid, processes)}
+    allowed = {source.pid: source for source in sources if source.kind == "application"
+               and source.pid in processes and source.pid not in blocked_roots and source.pid not in blocked
+               and not blocked.intersection(process_ancestors(source.pid, processes))
+               and gsr_audio_id(source)[4:].casefold().removesuffix(".exe") not in exclusions}
+    return [source for pid, source in allowed.items()
+            if not any(parent in allowed for parent in process_ancestors(pid, processes))]
 
 
 def gsr_recording_audio(tracks, sources):
@@ -338,7 +374,7 @@ def gsr_recording_audio(tracks, sources):
         if any(source.kind == "system" for source in inputs):
             # The system mix already contains the selected application's audio.
             inputs = [source for source in inputs if source.kind != "application"]
-        if len(track["audio_inputs"]) == 1 and len(inputs) == 1:
+        if not track.get("application_audio_invert") and len(track["audio_inputs"]) == 1 and len(inputs) == 1:
             source = inputs[0]
             if source.key not in selected:
                 selected[source.key] = source

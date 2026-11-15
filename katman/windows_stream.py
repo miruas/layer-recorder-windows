@@ -87,7 +87,11 @@ def stream_frame_rate(settings):
 def stream_audio_sources(settings, inventory):
     options = settings.get("record_options") or {}
     tracks = options.get("audio_track_item", [{"audio_inputs": ["default_output"]}])
-    return gsr_audio_selection(tracks, inventory)
+    sources = gsr_audio_selection(tracks, inventory)
+    if any(track.get("application_audio_invert") for track in tracks) and any(
+            source.kind == "system" for source in sources):
+        raise ValueError("Remove system output from the livestream to exclude application audio.")
+    return sources
 
 
 def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode,

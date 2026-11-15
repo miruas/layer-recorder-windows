@@ -32,6 +32,8 @@ The workflow also produces a **Layer-Windows-x64** portable artifact for source-
 
 For game audio, choose the system mix or individual applications. Selecting both can duplicate playback. Per-application audio uses WASAPI process loopback and requires Windows build 20348 or later. If an application is missing, start its audio playback and use **Refresh audio**. A selected capture microphone is a recording track. Set the Voice Control microphone separately.
 
+To exclude applications, use **Record audio from all applications except the selected ones** in a GSR audio track. Add the applications you want to exclude and remove any system output from that track. Layer captures the other applications it can see in Windows audio sessions. During recording and replay, it refreshes that list as applications start playback or restart. WASAPI captures a process and its children together. Layer skips a process tree that contains an excluded application at discovery time, so an audio process launched under an already captured parent can be heard until the next scan. When no eligible application has an audio session, the recording track starts once an eligible source appears. For livestreaming, Layer uses the eligible sessions present at stream start. Restart the stream after changes to the application or its child processes. Remove system output from the entire livestream mix to prevent it from reintroducing excluded audio.
+
 ### Make a recording
 
 1. Start **Record** in the overlay or click **Start recording** in the recorder.
@@ -192,13 +194,14 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 - Voice checks covered command add/edit/delete in the dialog, live WASAPI microphone open and release, and synthesized English input for the `Kivo` examples, including 180-, 30- and 135-second replay requests. Recording, replay and export regressions also passed with the listener active. In a quiet 10-second Razer Barracuda X test, the listener used approximately 0.47% of one CPU core and performed no speech decoding. This is an idle sample from one machine.
 - Local receiver tests covered WHIP video/audio and session termination, RTMP/FLV, fragmented MP4 and MPEG-TS over TCP, and HLS over HTTP PUT. See the [GSR port notes](https://github.com/miruas/layer-recorder-windows/blob/voice-control/docs/GSR_WINDOWS_PORT.md).
 - A Windows test using two live WASAPI output endpoints grouped into one named GSR track produced a stereo AAC track in both a recording and a two-second replay. Mixer tests verify sample addition, clipping, and track identity when an input disconnects.
+- A live WASAPI process-loopback test played separate 640 Hz and 940 Hz tones in two Windows test programs. With the 940 Hz program excluded by name, the 640 Hz signal had over 170 times the amplitude of the 940 Hz FFT bin in the captured PCM.
 
 ### Remaining gaps and validation
 
 | Area | Current limitation or open verification |
 | --- | --- |
 | Overlay coverage | The overlay is available over the desktop and borderless windows. Exclusive fullscreen can bypass desktop composition. Test shortcut ownership and behavior on the target game. |
-| Linux parity | Inverted GSR application audio remains open. Webcam discovery and composition have automated coverage using a simulated inventory and video inputs. Physical camera capture, timing and reconnect testing remain open. Windows uses its own capture and audio APIs. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
+| Linux parity | Inverted application audio uses Windows sessions and process trees. Live updates to the livestream audio inventory and complete parity for shared process trees remain open. Webcam discovery and composition have automated coverage using a simulated inventory and video inputs. Physical camera capture, timing and reconnect testing remain open. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
 | GPU coverage | AMD AMF recording and replay were tested on a real Windows window and with synthetic video. Full-display and gameplay testing on AMD, physical Intel Quick Sync, multi-monitor and mixed-DPI validation remain open. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
 | Audio timing | Independently launched media producers have approximate start alignment. Broad device and workload testing for latency, drift and sync remains pending. |
 | Replay transitions | Standalone replay must be stopped before normal recording starts. Transitioning while preserving the existing replay history remains open. Effective duration is constrained by the RAM budget and retained video. |

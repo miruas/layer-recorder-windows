@@ -26,6 +26,29 @@ from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 
 
 class ReplayTests(unittest.TestCase):
+    def test_inverted_gsr_audio_excludes_named_process_trees_without_duplicate_mixes(self):
+        from katman.windows_audio import inverse_application_audio
+
+        inventory = [AudioSource(f"app:{pid}", f"{name} (PID {pid})", "application", pid=pid)
+                     for pid, name in [(101, "Launcher"), (102, "Chat"), (103, "ChatAudio"),
+                                       (200, "Game"), (201, "GameAudio"), (202, "Browser")]]
+        processes = {101: (0, "Launcher.exe"), 102: (101, "Chat.exe"), 103: (102, "ChatAudio.exe"),
+                     200: (0, "Game.exe"), 201: (200, "GameAudio.exe"), 202: (0, "Browser.exe")}
+        with (patch("katman.windows_audio.process_snapshot", return_value=processes),
+              patch("katman.windows_audio.sys.getwindowsversion", create=True,
+                    return_value=Mock(build=22000))):
+            self.assertEqual([s.pid for s in inverse_application_audio(inventory, {"chat"})], [200, 202])
+            track = {"name": "Without chat", "audio_inputs": ["app:Chat.exe"], "application_audio_invert": True}
+            mixed, = gsr_recording_audio([track], inventory)
+            self.assertEqual(mixed.metadata["name"], "Without chat")
+            self.assertEqual([s.pid for s in mixed.inputs], [200, 202])
+            self.assertEqual(gsr_recording_audio([track], inventory[:3]), [])
+            new, = gsr_recording_audio([track], inventory[3:4])
+            self.assertEqual(new.key, mixed.key)
+            track["audio_inputs"].append("device:default_output")
+            with self.assertRaisesRegex(ValueError, "Remove system output"):
+                gsr_recording_audio([track], inventory)
+
     def test_directshow_inventory_uses_video_identity_and_known_modes(self):
         listing = ('[dshow] "Caméra HD" (video)\n'
                    '[dshow]   Alternative name "@device_pnp_camera"\n'
