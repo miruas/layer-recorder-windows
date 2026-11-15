@@ -21,6 +21,7 @@ struct Fragment {
     timestamp_offset: usize,
     wide: bool,
     start: f64,
+    end: f64,
 }
 impl Fragment {
     fn bytes(&self) -> usize {
@@ -89,6 +90,44 @@ fn timestamp(moof: &[u8]) -> Result<(usize, u64, bool)> {
     bail!("MP4 fragment has no decode timestamp")
 }
 
+fn fragment_duration(moof: &[u8]) -> Option<u64> {
+    let (_, traf) = boxes(moof.get(8..)?, 8).find(|(_, data)| &data[4..8] == b"traf")?;
+    let fields = || boxes(&traf[8..], 8);
+    let read_u32 = |data: &[u8], offset: usize| {
+        Some(u32::from_be_bytes(
+            data.get(offset..offset + 4)?.try_into().ok()?,
+        ))
+    };
+    let (_, tfhd) = fields().find(|(_, field)| &field[4..8] == b"tfhd")?;
+    let flags = read_u32(tfhd, 8)?;
+    let default_offset =
+        16 + if flags & 1 != 0 { 8 } else { 0 } + if flags & 2 != 0 { 4 } else { 0 };
+    let default_duration = if flags & 8 != 0 {
+        read_u32(tfhd, default_offset)
+    } else {
+        None
+    };
+    let mut total = 0u64;
+    for (_, trun) in fields().filter(|(_, field)| &field[4..8] == b"trun") {
+        let flags = read_u32(trun, 8)?;
+        let count = read_u32(trun, 12)?;
+        if flags & 0x100 == 0 {
+            total = total.checked_add(u64::from(count) * u64::from(default_duration?))?;
+            continue;
+        }
+        let offset = 16 + 4 * (flags & 5).count_ones() as usize;
+        let sample_size = 4 * (flags & 0xf00).count_ones() as usize;
+        let samples = trun.get(offset..)?;
+        if count as usize > samples.len() / sample_size {
+            return None;
+        }
+        for sample in samples.chunks_exact(sample_size).take(count as usize) {
+            total = total.checked_add(u64::from(read_u32(sample, 0)?))?;
+        }
+    }
+    (total > 0).then_some(total)
+}
+
 fn read_box(input: &mut impl Read) -> Result<Option<Vec<u8>>> {
     let mut header = [0; 8];
     if input.read(&mut header[..1])? == 0 {
@@ -141,7 +180,7 @@ impl Buffer {
             while ring
                 .fragments
                 .front()
-                .is_some_and(|f| start + f.start + 1.0 < cutoff)
+                .is_some_and(|f| start + f.end < cutoff)
             {
                 self.bytes -= ring.fragments.pop_front().unwrap().bytes();
             }
@@ -196,6 +235,8 @@ fn ingest(
             b"mdat" => {
                 let moof = pending.take().context("MP4 media has no fragment header")?;
                 let (timestamp_offset, timestamp, wide) = timestamp(&moof)?;
+                let start = timestamp as f64 / scale;
+                let duration = fragment_duration(&moof).map_or(1.0, |ticks| ticks as f64 / scale);
                 if let Some(file) = &mut recording {
                     file.write_all(&moof)?;
                     file.write_all(&data)?;
@@ -206,7 +247,8 @@ fn ingest(
                     timestamp,
                     timestamp_offset,
                     wide,
-                    start: timestamp as f64 / scale,
+                    start,
+                    end: start + duration,
                 };
                 let mut buffer = state.lock().unwrap();
                 let now = buffer.now();
@@ -441,7 +483,8 @@ fn handle(
                 json!({"bytes": state.bytes, "tracks": state.rings.iter().map(|(id, ring)| {
                 json!({"id": id, "started": ring.started, "count": ring.fragments.len(),
                     "first": ring.fragments.front().map(|f| f.start),
-                    "last": ring.fragments.back().map(|f| f.start), "error": ring.error})
+                    "last": ring.fragments.back().map(|f| f.start),
+                    "end": ring.fragments.back().map(|f| f.end), "error": ring.error})
             }).collect::<Vec<_>>() }),
             )
         }
@@ -495,19 +538,22 @@ fn handle(
                 let Some(first) = ring.fragments.front() else {
                     return Ok(Value::Null);
                 };
-                if first.start >= to || ring.fragments.back().unwrap().start + 1.0 <= from {
+                if first.start >= to || ring.fragments.back().unwrap().end <= from {
                     return Ok(Value::Null);
                 }
                 let start = ring
                     .fragments
                     .iter()
-                    .rposition(|f| f.start <= from)
-                    .unwrap_or(0);
+                    .position(|f| f.end > from)
+                    .unwrap_or(ring.fragments.len());
                 let end = ring
                     .fragments
                     .iter()
                     .position(|f| f.start >= to)
                     .unwrap_or(ring.fragments.len());
+                if start >= end {
+                    return Ok(Value::Null);
+                }
                 (
                     ring.fragments[start].start,
                     (
@@ -635,6 +681,7 @@ mod tests {
             timestamp_offset,
             wide,
             start: time as f64,
+            end: time as f64 + 1.0,
         }
     }
 
@@ -651,6 +698,27 @@ mod tests {
             10
         );
         assert_eq!(read_box(&mut input).unwrap().unwrap(), fragment.mdat);
+    }
+
+    #[test]
+    fn duration_counts_default_and_explicit_sample_lengths() {
+        let mut header = [0u8; 12];
+        header[3] = 8;
+        header[8..].copy_from_slice(&3000u32.to_be_bytes());
+        let default_run = [0u32, 2].map(u32::to_be_bytes).concat();
+        let explicit_run = [0x105u32, 2, 0, 0, 1000, 2000]
+            .map(u32::to_be_bytes)
+            .concat();
+        let track = [
+            atom(b"tfhd", &header),
+            atom(b"trun", &default_run),
+            atom(b"trun", &explicit_run),
+        ]
+        .concat();
+        assert_eq!(
+            fragment_duration(&atom(b"moof", &atom(b"traf", &track))),
+            Some(9000)
+        );
     }
 
     #[test]

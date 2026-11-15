@@ -23,7 +23,7 @@ class ReplayTests(unittest.TestCase):
         display = Display("DISPLAY1", 0, 0, 320, 240)
         audio = AudioSource("audio", "Test microphone", "microphone")
         state = {"tracks": [
-            {"id": 1, "started": 0, "first": 0, "last": 4, "count": 5},
+            {"id": 1, "started": 0, "first": 0, "last": 4, "end": 4.25, "count": 5},
             {"id": 2, "started": 0, "first": 0, "last": 14, "count": 15},
         ], "bytes": 1000}
         with (tempfile.TemporaryDirectory() as folder,
@@ -35,12 +35,12 @@ class ReplayTests(unittest.TestCase):
             capture = Capture(folder, [display], audio=[audio], record=True)
             try:
                 capture._retire(display.key)
-                self.assertEqual(capture.replay_status()[0], 5)
+                self.assertEqual(capture.replay_status()[0], 4.25)
                 capture.save_replay(3)
-                self.assertEqual(write.call_args.args[-2:], (2, 5))
+                self.assertEqual(write.call_args.args[-2:], (1.25, 4.25))
                 for call in request.call_args_list:
                     if call.args == ("snapshot",):
-                        self.assertEqual((call.kwargs["from"], call.kwargs["to"]), (2, 5))
+                        self.assertEqual((call.kwargs["from"], call.kwargs["to"]), (1.25, 4.25))
             finally:
                 capture.stop()
 

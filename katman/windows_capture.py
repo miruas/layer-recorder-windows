@@ -446,7 +446,8 @@ def replay_video_bounds(snapshots):
     if not video:
         return None
     first = min(row["started"] + row["first"] for _, row in video)
-    ends = [(track, row["started"] + row["last"] + 1) for track, row in video]
+    ends = [(track, row["started"] + (row["end"] if "end" in row else row["last"] + 1))
+            for track, row in video]
     live = [end for track, end in ends if not track.stopped]
     return first, min(live) if live else max(end for _, end in ends)
 
