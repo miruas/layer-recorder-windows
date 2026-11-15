@@ -94,6 +94,9 @@ track. Inverted application audio resolves current Windows audio sessions
 against the selected exclusions. Record and Replay refresh the selected
 sessions during capture. Livestream refreshes sessions while keeping its
 PCM output active and supplies silence while inputs are unavailable.
+Process-loopback activation releases the asynchronous operation as soon as
+it has a result. The callback stays alive until Windows releases its final
+reference, including when activation finishes after a timeout.
 Alt+F7 and the Record menu pause and resume recording. Resume starts new
 media segments, and the recording timeline excludes the paused interval.
 The Livestream card and Alt+F8 start or stop video publishing over RTMP or

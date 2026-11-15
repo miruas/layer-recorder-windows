@@ -27,6 +27,36 @@ from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 
 
 class ReplayTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Requires the Windows COM calling convention.")
+    def test_process_loopback_pins_late_callback_until_windows_releases_it(self):
+        from contextlib import ExitStack
+        import ctypes
+        from ctypes import wintypes
+        from katman import windows_audio
+
+        native = Mock()
+        handlers = []
+
+        def activate(_path, _iid, _params, handler, operation):
+            handlers.append(handler)
+            windows_audio.call(handler, 1, wintypes.ULONG, ())
+            ctypes.cast(operation, ctypes.POINTER(windows_audio.PTR))[0] = 123
+            return 0
+
+        native.ActivateAudioInterfaceAsync.side_effect = activate
+        before = set(windows_audio._pending_handlers)
+        with (patch.object(windows_audio.c, "WinDLL", return_value=native),
+              patch.object(windows_audio, "release") as release,
+              patch.object(windows_audio, "PROCESS_ACTIVATION_TIMEOUT", 0), ExitStack() as stack):
+            with self.assertRaisesRegex(OSError, "did not open"):
+                windows_audio.process_audio_client(stack, 321)
+            self.assertEqual(release.call_args.args[0].value, 123)
+            self.assertEqual(len(set(windows_audio._pending_handlers) - before), 1)
+        handler, = handlers
+        windows_audio.call(handler, 3, windows_audio.HR, (windows_audio.PTR,), None)
+        self.assertEqual(windows_audio.call(handler, 2, wintypes.ULONG, ()), 0)
+        self.assertEqual(set(windows_audio._pending_handlers), before)
+
     def test_live_audio_keeps_pcm_running_through_empty_and_replaced_sessions(self):
         from struct import pack
 

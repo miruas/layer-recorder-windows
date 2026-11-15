@@ -19,6 +19,7 @@ AUDIO_TIMESCALE = 48_000
 CHANNELS = 2
 FRAME_BYTES = CHANNELS * 2
 PROCESS_LOOPBACK_BUILD = 20348
+PROCESS_ACTIVATION_TIMEOUT = 5
 
 
 @dataclass(frozen=True)
@@ -385,11 +386,16 @@ def gsr_recording_audio(tracks, sources):
     return list(selected.values())
 
 
+_pending_handlers = {}
+_handlers_lock = threading.Lock()
+
+
 def process_audio_client(stack, pid):
     callback = c.WINFUNCTYPE(HR, PTR, PTR)
     query = c.WINFUNCTYPE(HR, PTR, c.POINTER(GUID), c.POINTER(PTR))
     ref = c.WINFUNCTYPE(w.ULONG, PTR)
     completed = threading.Event()
+    token = object()
     refs = 1
     refs_lock = threading.Lock()
 
@@ -400,12 +406,18 @@ def process_audio_client(stack, pid):
             refs += 1
             return refs
 
-    @ref
-    def release_ref(_):
+    def release_handler():
         nonlocal refs
         with refs_lock:
             refs -= 1
+            if refs == 0:
+                with _handlers_lock:
+                    _pending_handlers.pop(token, None)
             return refs
+
+    @ref
+    def release_ref(_):
+        return release_handler()
 
     @query
     def query_interface(this, iid, output):
@@ -431,23 +443,27 @@ def process_audio_client(stack, pid):
     activate_async = mmdevapi.ActivateAudioInterfaceAsync
     activate_async.argtypes = [w.LPCWSTR, c.POINTER(GUID), c.POINTER(Variant), PTR, c.POINTER(PTR)]
     activate_async.restype = HR
-    check(activate_async("VAD\\Process_Loopback", c.byref(IID_AUDIO_CLIENT), c.byref(variant),
-                         c.cast(handler, PTR), c.byref(operation)), "Start application audio activation")
-    stack.callback(release, operation)
-    # Keep the Python callback alive until Windows releases its reference,
-    # including when activation completes after the timeout.
-    _active_handlers.append((functions, table, handler, variant, params))
-    if not completed.wait(5):
-        raise OSError("Windows did not open the selected application audio in time.")
-    status, result = HR(), PTR()
-    check(call(operation, 3, HR, (c.POINTER(HR), c.POINTER(PTR)),
-               c.byref(status), c.byref(result)), "Read application audio activation")
-    check(status.value, "Open application audio")
-    stack.callback(release, result)
-    return result
-
-
-_active_handlers = []
+    # Pin the ctypes callbacks before Win32 can take a reference. If activation
+    # times out, Windows retains its reference until the late callback completes.
+    with _handlers_lock:
+        _pending_handlers[token] = (functions, table, handler, variant, params)
+    try:
+        check(activate_async("VAD\\Process_Loopback", c.byref(IID_AUDIO_CLIENT), c.byref(variant),
+                             c.cast(handler, PTR), c.byref(operation)), "Start application audio activation")
+        if not completed.wait(PROCESS_ACTIVATION_TIMEOUT):
+            raise OSError("Windows did not open the selected application audio in time.")
+        status, result = HR(), PTR()
+        check(call(operation, 3, HR, (c.POINTER(HR), c.POINTER(PTR)),
+                   c.byref(status), c.byref(result)), "Read application audio activation")
+        check(status.value, "Open application audio")
+        stack.callback(release, result)
+        return result
+    finally:
+        try:
+            if operation:
+                release(operation)
+        finally:
+            release_handler()
 
 
 def audio_client(ole, stack, source):
