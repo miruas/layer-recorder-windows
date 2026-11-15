@@ -49,6 +49,8 @@ Normal recording keeps replay available. If a standalone Instant Replay session 
 3. Use **Alt+F10** for the configured replay duration, **Alt+F11** for the short save, or **Alt+F12** for the long save. Keyboard and UI saves can use the shorter history already available. Voice saves require the full requested duration.
 4. Open **Recordings** in the GSR overlay or **Open editor** in the recorder to find the new project.
 
+The GSR Record and Instant Replay settings can independently put captures in an application subfolder or prefix their names with the application. Layer keeps the `project.katman` filename and uses the application name for the project folder and Studio title when naming is enabled. Record uses the capture window or the foreground application at start. Replay uses the foreground application when you request the save. With the overlay open, Layer uses the window that was active before it opened. The games-only choice currently recognizes applications running from a Steam library's `steamapps/common` directory.
+
 In **Instant Replay → Settings**, you can start replay automatically with Layer or when a supported Steam game launches. Choose a monitor target for automatic start. The optional AC power condition also stops an automatically started replay when the machine is unplugged. Disabling automatic replay or exiting the detected game stops its automatic session. Manual capture stays under your control, and an automatic trigger does not start another capture during a livestream.
 
 ### Choose a video encoder
@@ -122,7 +124,7 @@ For `clip {duration} of that`, say “Kivo, clip one minute and ten seconds of t
 
 ### Screenshots
 
-Open the overlay's screenshot settings to select the target, PNG or JPEG, save directory, optional resize, and disk or clipboard output. At least one destination must be enabled. **Print Screen** captures the configured target. **Shift+Print Screen** captures the foreground window. **Ctrl+Print Screen** opens a region selector on the cursor monitor. Drag to select or press **Escape** to cancel.
+Open the overlay's screenshot settings to select the target, PNG or JPEG, save directory, optional resize, and disk or clipboard output. At least one destination must be enabled. Application folder and naming settings apply to disk output. **Print Screen** captures the configured target. **Shift+Print Screen** captures the foreground window. **Ctrl+Print Screen** opens a region selector on the cursor monitor. Drag to select or press **Escape** to cancel.
 
 ## Edit and export
 
@@ -185,7 +187,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | Capture and replay | Display, window and region capture, DirectShow webcam overlays, normal record/pause/resume, bounded encoded replay, independent WASAPI tracks, selected source rediscovery, monitor identity across reorders, and reconnect handling |
 | Video encoding | Software H.264 and supported NVENC H.264, HEVC and AV1; NVENC 10-bit SDR where available; explicit AMF/QSV H.264 choices; Desktop Duplication and GDI paths |
 | Streaming and screenshots | RTMP/RTMPS, WHIP, supported custom container/protocol combinations, and monitor, window and region screenshots with disk or clipboard destinations |
-| Studio | Layer project browsing, independent source tracks, playback, voiceover, and MP4 export |
+| Studio | Layer project browsing, application-named projects and subfolders, independent source tracks, playback, voiceover, and MP4 export |
 | Voice Control | Offline English recognition, selectable microphone, custom wake phrase, editable command list, dynamic replay length parsing, available history validation, repeat suppression and listener shutdown |
 
 ### Verified

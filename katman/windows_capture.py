@@ -498,7 +498,7 @@ def replay_video_bounds(snapshots):
     return first, min(live) if live else max(end for _, end in ends)
 
 
-def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
+def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=(), *, output=None):
     sources = []
     warnings = list(warnings)
     for track, media, start in tracks:
@@ -539,8 +539,9 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
         source["timeline_start"] = max(0, relative_start)
     if not sources or end <= cutoff:
         raise RuntimeError("No sources overlap the saved interval.")
-    project = {"format": "katman", "version": 1, "id": uuid.uuid4().hex, "name": "Desktop",
-               "application": "Desktop", "kind": kind, "created": datetime.now().astimezone().isoformat(),
+    project = {"format": "katman", "version": 1, "id": uuid.uuid4().hex, "name": output.name if output else "Desktop",
+               "application": output.application if output else "Desktop", "kind": kind,
+               "created": datetime.now().astimezone().isoformat(),
                "fps": tracks[0][0].fps, "duration": end - cutoff, "sources": sources,
                "sections": [], "warnings": list(warnings)}
     # The timeline compositor stops drawing a retired source when its clip ends.
@@ -568,15 +569,17 @@ class Capture:
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
                  color_range=None, rate_control=None, container="mp4", replay_directory=None,
                  replay_container=None, audio_codec="aac", framerate_mode=None, ten_bit=False,
-                 gsr_audio_tracks=None, webcam=None):
+                 gsr_audio_tracks=None, webcam=None, recording_output=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
             raise ValueError("Frame rate, replay duration and memory budget must be positive.")
         if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
             raise RuntimeError("Install FFmpeg and add both ffmpeg and ffprobe to PATH.")
-        self.library = Path(library).expanduser().resolve()
-        self.replay_directory = Path(replay_directory).expanduser().resolve() if replay_directory else self.library
+        base_library = Path(library).expanduser().resolve()
+        self.library = Path(recording_output.directory).expanduser().resolve() if recording_output else base_library
+        self.recording_output = recording_output
+        self.replay_directory = Path(replay_directory).expanduser().resolve() if replay_directory else base_library
         self.library.mkdir(parents=True, exist_ok=True)
         self.record_folder = None
         self.fps = fps
@@ -625,7 +628,8 @@ class Capture:
                 pass
         try:
             if record:
-                self.record_folder = Path(tempfile.mkdtemp(prefix="Layer-recording-", dir=self.library))
+                prefix = recording_output.prefix if recording_output else "Layer-recording-"
+                self.record_folder = Path(tempfile.mkdtemp(prefix=prefix, dir=self.library))
                 (self.record_folder / "media").mkdir()
             for source in selected:
                 self._start_track(source)
@@ -841,13 +845,13 @@ class Capture:
                 raise RuntimeError(f"No media was completed. Recording folder: {self.record_folder}. "
                                    + " ".join(self.warnings))
             path = self.record_folder / "project.katman"
-            self._write_project(path, "recording", tracks)
+            self._write_project(path, "recording", tracks, output=self.recording_output)
             self.final_project = path
             return path
         finally:
             self.stop()
 
-    def save_replay(self, seconds, *, require_full_duration=False):
+    def save_replay(self, seconds, *, require_full_duration=False, output=None):
         if not 0 < seconds <= self.seconds:
             raise ValueError("Replay duration must fit inside the configured buffer.")
         state = self._status()
@@ -859,8 +863,10 @@ class Capture:
         if require_full_duration and end - first < seconds:
             raise ValueError(f"Requested {seconds:g} s, but only {int(end - first)} s of replay is available.")
         cutoff = max(first, end - seconds)
-        self.replay_directory.mkdir(parents=True, exist_ok=True)
-        folder = Path(tempfile.mkdtemp(prefix="Layer-replay-", dir=self.replay_directory))
+        directory = output.directory if output else self.replay_directory
+        prefix = output.prefix if output else "Layer-replay-"
+        directory.mkdir(parents=True, exist_ok=True)
+        folder = Path(tempfile.mkdtemp(prefix=prefix, dir=directory))
         try:
             (folder / "media").mkdir()
             tracks = []
@@ -872,13 +878,13 @@ class Capture:
                 if first is not None:
                     tracks.append((track, media, start + first))
             path = folder / "project.katman"
-            self._write_project(path, "replay", tracks, cutoff, end)
+            self._write_project(path, "replay", tracks, cutoff, end, output=output)
             return path
         except Exception:
             shutil.rmtree(folder)
             raise
 
-    def _write_project(self, path, kind, tracks, cutoff=None, end=None):
+    def _write_project(self, path, kind, tracks, cutoff=None, end=None, *, output=None):
         container = self.replay_container if kind == "replay" else self.container
         extension = RECORDING_CONTAINERS[container]
         converted = []
@@ -906,7 +912,7 @@ class Capture:
                 converted.append((track, media, start))
             finally:
                 pending.unlink(missing_ok=True)
-        project = project_data(path.parent, kind, converted, cutoff, end, warnings)
+        project = project_data(path.parent, kind, converted, cutoff, end, warnings, output=output)
         atomic_json(path, project)
         used = {source["file"] for source in project["sources"]}
         for original, output in cleanup:

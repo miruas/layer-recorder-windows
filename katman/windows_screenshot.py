@@ -126,7 +126,7 @@ def copy_image_to_clipboard(image_bytes, owner):
             kernel32.GlobalFree(handle)
 
 
-def take_screenshot(source, settings, clipboard_owner=None):
+def take_screenshot(source, settings, clipboard_owner=None, *, window=None):
     save_to_disk = settings.get("save_screenshot_to_disk", True)
     save_to_clipboard = settings.get("save_screenshot_to_clipboard", False)
     if not save_to_disk and not save_to_clipboard:
@@ -150,7 +150,7 @@ def take_screenshot(source, settings, clipboard_owner=None):
     result = subprocess.run(command, capture_output=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode or not result.stdout:
         raise RuntimeError(result.stderr.decode("utf-8", errors="replace").strip() or "Screenshot capture failed.")
-    path = save_image(result.stdout, settings, extension) if save_to_disk else None
+    path = save_image(result.stdout, settings, extension, window=window) if save_to_disk else None
     if save_to_clipboard:
         try:
             copy_image_to_clipboard(result.stdout, clipboard_owner)
@@ -161,11 +161,15 @@ def take_screenshot(source, settings, clipboard_owner=None):
     return path
 
 
-def save_image(data, settings, extension):
+def save_image(data, settings, extension, *, window=None):
+    from .windows_output import capture_output
+
     configured = settings.get("save_directory")
     directory = Path(configured) if isinstance(configured, str) and configured else Path.home() / "Pictures"
+    output = capture_output(settings, directory, "Screenshot_", window)
+    directory = output.directory
     directory.mkdir(parents=True, exist_ok=True)
-    name = f"Screenshot_{datetime.now():%Y-%m-%d_%H-%M-%S_%f}.{extension}"
+    name = f"{output.prefix}{datetime.now():%Y-%m-%d_%H-%M-%S_%f}.{extension}"
     path = directory / name
     with tempfile.NamedTemporaryFile(dir=directory, delete=False) as temporary:
         pending = Path(temporary.name)

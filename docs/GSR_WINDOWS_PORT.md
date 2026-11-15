@@ -76,6 +76,10 @@ independently of disk output. Ctrl+Print Screen opens a drag selector on the
 cursor monitor. Escape cancels selection. Record, Instant Replay and Livestream
 open their original GSR settings pages. Record and Replay launched from the
 overlay use the saved frame rate and monitor. Replay also uses its buffer and save lengths.
+Record, Replay and disk screenshots honor application folder and naming
+preferences. Windows resolves application identity from the selected or
+foreground window's process. Games-only naming recognizes Steam library
+install paths.
 Record, Replay and Livestream honor the configured output resolution. Odd
 dimensions round up to even sizes for H.264. Resizing uses the GDI capture
 path with the selected encoder.

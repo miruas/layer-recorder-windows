@@ -25,6 +25,7 @@ from .windows_capture import (
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings, is_monitor_target
+from .windows_output import capture_output
 from .windows_webcam import camera_inventory, gsr_webcam
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
@@ -447,6 +448,9 @@ def capture_controls(library, *, background=False):
         follow_screens = follow_displays.get() and not chosen_monitor and region is None
         replay_save_lengths = save_lengths
         status.set("Starting capture…")
+        recording_output = (capture_output(settings, recording_directory, "Layer-recording-",
+                                           foreground_window() if window_handle is None else window_handle)
+                            if use_gsr and kind == "record" else None)
         submit("automatic_replay" if automatic else kind, lambda: Capture(recording_directory, selected, rate,
                                      gsr_recording_encoder(record_options, codec, container, replay_container)
                                      if use_gsr else codec,
@@ -458,15 +462,20 @@ def capture_controls(library, *, background=False):
                                      replay_container=replay_container, audio_codec=audio_codec,
                                      framerate_mode=video_framerate_mode(record_options),
                                      ten_bit=gsr_ten_bit(record_options),
-                                     gsr_audio_tracks=configured_tracks, webcam=gsr_webcam(record_options)))
+                                     gsr_audio_tracks=configured_tracks, webcam=gsr_webcam(record_options),
+                                     recording_output=recording_output))
 
     def stop():
         status.set("Finishing capture…")
         submit("stop", capture.finish_recording if mode == "record" else capture.stop)
 
-    def save(seconds, *, require_full_duration=False):
+    def save(seconds, *, require_full_duration=False, window_handle=None):
+        session = capture
+        output = (capture_output(gsr_settings("replay"), session.replay_directory, "Layer-replay-",
+                                 foreground_window() if window_handle is None else window_handle)
+                  if session.gsr_audio_tracks is not None else None)
         status.set("Saving replay…")
-        submit("save", lambda: capture.save_replay(seconds, require_full_duration=require_full_duration))
+        submit("save", lambda: session.save_replay(seconds, require_full_duration=require_full_duration, output=output))
 
     def apply_voice_config(config):
         nonlocal voice_config, voice_pending
@@ -662,12 +671,12 @@ def capture_controls(library, *, background=False):
                             status.set(str(error))
                             show()
                         return
-                    start(overlay_region_capture, use_gsr=True, region=region)
+                    start(overlay_region_capture, use_gsr=True, region=region, window_handle=overlay_window)
                     return
                 source = desktop_source(x, y, width, height)
                 settings = screenshot_settings()
                 clipboard_owner = root.winfo_id()
-                submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
+                submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner, window=overlay_window))
         elif not busy and action in {b"toggle_record", b"toggle_replay", b"toggle_pause", b"save_replay", b"save_short", b"save_long"}:
             handle_hotkey(action.decode("ascii"), from_overlay=True)
         elif not busy and action == b"toggle_stream":
@@ -678,6 +687,7 @@ def capture_controls(library, *, background=False):
 
         try:
             settings = screenshot_settings()
+            window_handle = foreground_window() if window_handle is None else window_handle
             if action == "screenshot_region" or (
                 action == "screenshot" and settings.get("record_area_option") == "region"
             ):
@@ -685,7 +695,7 @@ def capture_controls(library, *, background=False):
                 return
             source = screenshot_source(settings, action, window_handle=window_handle)
             clipboard_owner = root.winfo_id()
-            submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner))
+            submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner, window=window_handle))
         except (OSError, RuntimeError) as error:
             status.set(str(error))
 
@@ -730,7 +740,7 @@ def capture_controls(library, *, background=False):
                 status.set("Replay is already active with this recording.")
         elif capture is not None:
             default = min(60, capture.seconds) if action == "save_short" else capture.seconds
-            save(replay_save_lengths.get(action, default))
+            save(replay_save_lengths.get(action, default), window_handle=overlay_window if from_overlay else None)
         else:
             status.set("Start replay or recording before saving a replay.")
 

@@ -23,11 +23,36 @@ from katman.windows_audio import (
     mix_live_audio,
 )
 from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
-from katman.windows_screenshot import capture_monitor, screenshot_source
+from katman.windows_output import capture_output, safe_component
+from katman.windows_screenshot import capture_monitor, save_image, screenshot_source
 from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 
 
 class ReplayTests(unittest.TestCase):
+    def test_capture_naming_honors_independent_folder_and_game_only_settings(self):
+        settings = {"organize_into_folders": "yes", "name_after_captured_application": "yes_only_games"}
+        root = Path("Library")
+        self.assertEqual(safe_component("CON.txt"), "_CON.txt")
+        self.assertEqual(safe_component("../Üç: oyun"), "_Üç_ oyun")
+        with patch("katman.windows_output.window_application", return_value=("My Browser", False)) as app:
+            output = capture_output(settings, root, "Layer-replay-", 900)
+            self.assertEqual((output.directory, output.prefix, output.name),
+                             (root / "My Browser", "Layer-replay-", "Desktop"))
+            app.assert_called_once_with(900)
+            app.return_value = ("My Game", True)
+            output = capture_output(settings, root, "Layer-recording-", 900)
+            self.assertEqual((output.directory, output.prefix, output.name),
+                             (root / "My Game", "My Game-Layer-recording-", "My Game"))
+
+    def test_screenshot_uses_application_directory_and_prefix(self):
+        with (tempfile.TemporaryDirectory() as directory,
+              patch("katman.windows_output.window_application", return_value=("My Game", True))):
+            path = save_image(b"screenshot", {"save_directory": directory, "organize_into_folders": "yes",
+                              "name_after_captured_application": "yes"}, "png", window=900)
+            self.assertEqual(path.parent, Path(directory) / "My Game")
+            self.assertTrue(path.name.startswith("My Game-Screenshot_"))
+            self.assertEqual(path.read_bytes(), b"screenshot")
+
     def test_autostart_trigger_preserves_legacy_game_mode_and_respects_ac_power(self):
         game, power = Mock(return_value=42), Mock(return_value=False)
         mode = "turn_on_replay_automatically_mode"

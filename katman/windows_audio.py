@@ -172,7 +172,7 @@ def endpoints(stack, devices, flow):
             yield object_result(current, collection, 4, (U32,), (index,), "Read audio endpoint")
 
 
-def process_name(pid):
+def process_path(pid):
     kernel = c.WinDLL("kernel32")
     kernel.OpenProcess.argtypes = [U32, w.BOOL, U32]
     kernel.OpenProcess.restype = w.HANDLE
@@ -185,10 +185,15 @@ def process_name(pid):
         path = c.create_unicode_buffer(32768)
         length = U32(len(path))
         if kernel.QueryFullProcessImageNameW(handle, 0, path, c.byref(length)):
-            return Path(path.value).stem
+            return Path(path.value)
         return None
     finally:
         kernel.CloseHandle(handle)
+
+
+def process_name(pid):
+    path = process_path(pid)
+    return path.stem if path else None
 
 
 def process_snapshot():
