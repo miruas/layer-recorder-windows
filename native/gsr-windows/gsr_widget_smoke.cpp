@@ -6,16 +6,38 @@
 #include "Config.hpp"
 #include "GsrInfo.hpp"
 #include "Theme.hpp"
+#include "Utils.hpp"
 #include "gui/DropdownButton.hpp"
 #include "gui/ScreenshotSettingsPage.hpp"
 #include "front_page.hpp"
 #include <cstdio>
+#include <filesystem>
 #include <string>
+#include <thread>
 #include <vector>
 
 static void drain(mgl::Window &window, gsr::DropdownButton &button) {
     mgl::Event event;
     while (window.poll_event(event)) button.on_event(event, window, {0, 0});
+}
+
+static bool test_settings_write_during_read() {
+    const auto path = std::filesystem::u8path(gsr::get_config_dir()) / "config_ui";
+    const auto utf8_path = path.u8string();
+    std::string original;
+    if (!gsr::file_get_content(utf8_path.c_str(), original)) return false;
+    const auto reader = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (reader == INVALID_HANDLE_VALUE) return false;
+    std::thread release_reader([reader] {
+        Sleep(35);
+        CloseHandle(reader);
+    });
+    const auto updated = original + "\n";
+    const bool saved = gsr::file_overwrite(utf8_path.c_str(), updated);
+    release_reader.join();
+    std::string content;
+    return saved && gsr::file_get_content(utf8_path.c_str(), content) && content == updated;
 }
 
 static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrInfo &info) {
@@ -150,6 +172,7 @@ static int test(const std::string &resources) {
         if (clicked != "start") result = 5;
     }
     if (!result && !test_front_page(window, config, info)) result = 6;
+    if (!result && !test_settings_write_during_read()) result = 8;
     gsr::deinit_color_theme();
     gsr::deinit_theme();
     return result;

@@ -57,8 +57,16 @@ bool file_overwrite(const char *name, const std::string &content) {
     std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
     output.write(content.data(), static_cast<std::streamsize>(content.size()));
     output.close();
-    if (output && MoveFileExW(temporary.c_str(), path.c_str(),
+    if (output) {
+        for (int attempt = 0; attempt < 10; ++attempt) {
+            if (MoveFileExW(temporary.c_str(), path.c_str(),
                             MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+            // The recorder may briefly read config_ui without delete sharing.
+            const auto error = GetLastError();
+            if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) break;
+            if (attempt < 9) Sleep(15);
+        }
+    }
     std::error_code error;
     fs::remove(temporary, error);
     return false;
