@@ -26,6 +26,13 @@ $fileChooser = Join-Path $build 'file_chooser_generated.cpp'
 $settingsPage = Join-Path $build 'settings_page_generated.cpp'
 $settingsCode = Get-Content -LiteralPath "$source/src/gui/SettingsPage.cpp" -Raw
 $settingsCode = $settingsCode.Replace('../../include/', '')
+$settingsCode = $settingsCode.Replace('    static std::optional<std::string> webcam_get_name(std::string_view webcam_path) {',
+    "    std::string windows_webcam_name(std::string_view device);"+[Environment]::NewLine+
+    "    static std::optional<std::string> webcam_get_name(std::string_view webcam_path) {"+[Environment]::NewLine+
+    '        if(starts_with(webcam_path, "dshow:")) return windows_webcam_name(webcam_path);')
+$settingsCode = $settingsCode.Replace('        webcam_sources_box_ptr->set_selected_item(record_options.webcam_source);',
+    "        if(!record_options.webcam_source.empty()) webcam_sources_box_ptr->add_item(windows_webcam_name(record_options.webcam_source), record_options.webcam_source, false);"+[Environment]::NewLine+
+    '        webcam_sources_box_ptr->set_selected_item(record_options.webcam_source);')
 $settingsCode = $settingsCode.Replace('Sync to content (Only X11 or desktop portal capture)', 'Sync to content')
 foreach ($codec in 'hevc', 'av1', 'hevc_10bit', 'av1_10bit') {
     $settingsCode = $settingsCode.Replace("if(gsr_info->supported_video_codecs.$codec)",

@@ -22,9 +22,35 @@ from katman.windows_audio import (
 )
 from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
 from katman.windows_screenshot import capture_monitor, screenshot_source
+from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 
 
 class ReplayTests(unittest.TestCase):
+    def test_directshow_inventory_uses_video_identity_and_known_modes(self):
+        listing = ('[dshow] "Caméra HD" (video)\n'
+                   '[dshow]   Alternative name "@device_pnp_camera"\n'
+                   '[dshow] "Microphone" (audio)\n'
+                   '[dshow]   Alternative name "@device_cm_mic"')
+        modes = ('[dshow] pixel_format=yuyv422 min s=640x480 fps=15 max s=640x480 fps=30\n'
+                 '[dshow] vcodec=mjpeg min s=1920x1080 fps=30 max s=1920x1080 fps=30')
+        with patch("katman.windows_webcam.dshow_log", side_effect=[listing, modes]) as run:
+            self.assertEqual(camera_inventory(), "dshow:@device_pnp_camera\tCaméra HD\n"
+                             "yuyv\t640\t480\t15\nyuyv\t640\t480\t30\nmjpeg\t1920\t1080\t30")
+            self.assertEqual(run.call_args.args[-1], "video=@device_pnp_camera")
+
+    def test_webcam_livestream_maps_pipe_audio_after_desktop_and_camera(self):
+        camera = gsr_webcam({"webcam_source": "dshow:Camera", "webcam_video_format": "mjpeg"})
+        with (patch.object(subprocess, "CREATE_NO_WINDOW", 0, create=True),
+              patch("katman.windows_stream.subprocess.Popen") as start,
+              patch("katman.windows_stream.threading.Thread", return_value=Mock())):
+            Livestream(Display("Fixture", 0, 0, 320, 240), 30, "libx264",
+                       CustomDestination("test.mp4", "mp4"), audio=[object()], webcam=camera)
+        args = start.call_args.args[0]
+        self.assertEqual([args[i + 1] for i, arg in enumerate(args) if arg == "-i"],
+                         ["desktop", "video=Camera", "pipe:0"])
+        self.assertEqual([args[i + 1] for i, arg in enumerate(args) if arg == "-map"],
+                         ["2:a:0", "[webcam_video]"])
+
     def test_gsr_mixes_inputs_per_track_and_keeps_the_track_key_on_disconnect(self):
         mic = AudioSource("microphone:mic", "Microphone", "microphone", "mic")
         speaker = AudioSource("system:speaker", "Speakers", "system", "speaker", default=True)
@@ -363,6 +389,21 @@ def wait_fragments(test, capture, track, count=1):
 @unittest.skipUnless(capture_binary().is_file() and shutil.which("ffmpeg") and shutil.which("ffprobe"),
                      "The Rust capture engine and FFmpeg are required")
 class ProjectTests(unittest.TestCase):
+    def test_webcam_composition_places_camera_in_output_frame(self):
+        camera = gsr_webcam({"webcam_source": "dshow:Fixture", "webcam_x": 75, "webcam_y": 75,
+                             "webcam_width": 25, "webcam_height": 25,
+                             "webcam_flip_horizontally": True})
+        command = capture_command(Display("Fixture", 0, 0, 320, 240), 30, "libx264")
+        command[4:command.index("-an")] = ["-f", "lavfi", "-i", "color=black:s=320x240:r=30"]
+        with patch("katman.windows_webcam.webcam_input",
+                   return_value=["-f", "lavfi", "-i", "color=white:s=160x120:r=30"]):
+            add_webcam(command, camera, (320, 240))
+        output = subprocess.check_output(
+            command[:command.index("-c:v")] + ["-frames:v", "1", "-f", "rawvideo", "pipe:1"], timeout=10)
+        self.assertEqual(len(output), 320 * 240 * 3 // 2)
+        self.assertEqual(output[20 * 320 + 20], 16)
+        self.assertEqual(output[210 * 320 + 280], 235)
+
     def test_pause_trims_old_generations_before_resuming_recording(self):
         monitor = Display("DISPLAY1", 0, 0, 96, 64, True)
         microphone = AudioSource("mic:fixture", "Test microphone", "microphone")

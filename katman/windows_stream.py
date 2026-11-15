@@ -90,8 +90,9 @@ def stream_audio_sources(settings, inventory):
     return gsr_audio_selection(tracks, inventory)
 
 
-def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode):
-    if encoder == "h264_nvenc" and resolution is None and color_range != "tv" and (
+def stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control, framerate_mode,
+                         webcam=None):
+    if webcam is None and encoder == "h264_nvenc" and resolution is None and color_range != "tv" and (
             framerate_mode != "content" and not display.window and display.width % 2 == display.height % 2 == 0):
         try:
             monitor = next((monitor for monitor in displays() if display == monitor or (
@@ -115,20 +116,25 @@ def stream_video_command(display, fps, encoder, resolution, cursor, color_range,
     set_video_color_range(command, color_range)
     set_video_rate_control(command, rate_control)
     set_video_framerate_mode(command, framerate_mode, fps)
+    if webcam is not None:
+        from .windows_webcam import add_webcam
+        add_webcam(command, webcam, resolution or (display.width, display.height))
     return command
 
 
 class Livestream:
     def __init__(self, display, fps, encoder, destination, audio=(), *, resolution=None, cursor=None,
-                 color_range=None, rate_control=None, framerate_mode=None):
+                 color_range=None, rate_control=None, framerate_mode=None, webcam=None):
         whip = isinstance(destination, WhipDestination)
         command = stream_video_command(display, fps, encoder, resolution, cursor, color_range, rate_control,
-                                       framerate_mode)
+                                       framerate_mode, webcam)
         # Keep the existing capture and encoding options and replace MP4 output.
         command = command[:command.index("-video_track_timescale")]
         if audio:
             maps = ["-map", "0:v:0", "-map", "1:a:0"]
-            if "-filter_complex" in command:
+            if webcam is not None:
+                maps = ["-map", "2:a:0"]
+            elif "-filter_complex" in command:
                 graph = command.index("-filter_complex") + 1
                 command[graph] += ",setpts=PTS-STARTPTS[video]"
                 maps = ["-map", "[video]", "-map", "0:a:0"]
@@ -139,7 +145,7 @@ class Livestream:
                 "-ac", str(CHANNELS), "-i", "pipe:0", *maps,
                 "-c:a", "libopus" if whip else "aac", "-b:a", "160k", "-shortest",
             ]
-            if "-filter_complex" in command:
+            if "-filter_complex" in command and webcam is None:
                 # FFmpeg's shortest-stream queue stalls this source-only video graph.
                 command.remove("-shortest")
             command.insert(1, "-nostdin")

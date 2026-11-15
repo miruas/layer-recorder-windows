@@ -24,6 +24,7 @@ from .windows_capture import (
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings, is_monitor_target
+from .windows_webcam import camera_inventory, gsr_webcam
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
 
@@ -152,6 +153,20 @@ def capture_controls(library, *, background=False):
     voice_status = tk.StringVar(value="Voice Control is off.")
     voice = VoiceListener()
     voice_pending = None
+    cameras = ""
+    camera_scan = None
+
+    def refresh_cameras():
+        nonlocal camera_scan
+        if camera_scan is not None and camera_scan.is_alive():
+            return
+
+        def scan():
+            nonlocal cameras
+            cameras = camera_inventory()
+
+        camera_scan = threading.Thread(target=scan, name="Layer camera discovery", daemon=True)
+        camera_scan.start()
     try:
         voice_config = load_config()
     except (OSError, ValueError) as error:
@@ -444,7 +459,7 @@ def capture_controls(library, *, background=False):
                                      replay_container=replay_container, audio_codec=audio_codec,
                                      framerate_mode=video_framerate_mode(record_options),
                                      ten_bit=gsr_ten_bit(record_options),
-                                     gsr_audio_tracks=configured_tracks))
+                                     gsr_audio_tracks=configured_tracks, webcam=gsr_webcam(record_options)))
 
     def stop():
         status.set("Finishing capture…")
@@ -516,7 +531,7 @@ def capture_controls(library, *, background=False):
             return Livestream(source, rate, gsr_h264_encoder(options, codec), destination, audio,
                               resolution=video_resolution(options), cursor=video_cursor(options),
                               color_range=video_color_range(options), rate_control=video_rate_control(options),
-                              framerate_mode=video_framerate_mode(options))
+                              framerate_mode=video_framerate_mode(options), webcam=gsr_webcam(options))
 
         submit("stream_start", publish)
 
@@ -549,11 +564,12 @@ def capture_controls(library, *, background=False):
             from .windows_audio import gsr_audio_inventory
 
             inventory = gsr_audio_inventory(last_audio_inventory or ())
+            refresh_cameras()
             overlay = subprocess.Popen(
                 [str(executable), str(resources), overlay_mode],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory,
+                env={**os.environ, "LAYER_GSR_AUDIO_INVENTORY": inventory, "LAYER_GSR_CAMERA_INVENTORY": cameras,
                      **{f"LAYER_GSR_{codec.upper()}_NVENC": str(int(available))
                         for codec, available in nvenc_recording_support.items()}},
             )
@@ -963,6 +979,7 @@ def capture_controls(library, *, background=False):
         refresh_audio()
 
     root.after(200, initialize_capture)
+    refresh_cameras()
     if voice_config.enabled:
         voice.configure(voice_config)
     try:

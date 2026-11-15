@@ -92,6 +92,13 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     if (devices.size() != 2 || devices[1].description != "Mikrofon \xC3\x87" ||
         gsr::get_application_audio() != std::vector<std::string>{"game.exe"})
         return false;
+    _wputenv_s(L"LAYER_GSR_CAMERA_INVENTORY",
+        L"dshow:@device_pnp_camera\tCam\u00e9ra HD\nyuyv\t640\t480\t30\nmjpeg\t1920\t1080\t60");
+    const auto cameras = gsr::get_supported_capture_options(info).cameras;
+    if (cameras.size() != 1 || cameras[0].path != "dshow:@device_pnp_camera" ||
+        cameras[0].yuyv_setups.size() != 1 || cameras[0].mjpeg_setups.size() != 1 ||
+        cameras[0].yuyv_setups[0].resolution.x != 640 || cameras[0].mjpeg_setups[0].fps != 60)
+        return false;
     info.system_info.supports_app_audio = true;
     const std::vector<std::string> saved_inputs = {"device:system:disconnected.monitor", "app:offline.exe"};
     const std::string disconnected_monitor = R"(\\.\DISPLAY99)";

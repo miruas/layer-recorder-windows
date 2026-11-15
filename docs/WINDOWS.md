@@ -62,6 +62,12 @@ Layer tries Desktop Duplication for compatible NVENC display or region capture. 
 
 GSR audio codec selection applies to recording and replay audio tracks. Add multiple inputs to a single GSR audio track to mix them into one project track. Add separate GSR tracks to keep their audio independently editable. If one track contains both a system mix and an application, Layer uses the system mix to avoid doubling the application audio. A replay made during a recording shares its encoded tracks. MOV and FLV output convert Opus audio to AAC when needed.
 
+### Add a webcam overlay
+
+In the GSR **Record**, **Instant Replay** or **Livestream** settings, select a camera under **Webcam** and use the position, size and horizontal flip controls. If a newly connected camera is missing, close the overlay, allow device discovery to finish, and reopen it. Use **Auto** to let DirectShow select a format. The settings can also show advertised YUYV and MJPEG modes with whole-number frame rates. Select microphone audio separately.
+
+Webcam composition uses the GDI capture path and the configured video encoder. Test a short recording before a stream. Check Windows camera permissions, connection and whether another application is using the camera if it fails to open.
+
 ## Voice Control
 
 ### Initial setup
@@ -172,7 +178,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | --- | --- |
 | Distribution | x64 Setup, portable ZIP, Start menu entries, tray operation, single instance, optional launch at sign-in and desktop shortcut, optional project file association, and preservation of the sign-in choice during upgrade |
 | Overlay and settings | Original Layer-patched GSR widgets and assets on Win32, live desktop dimming with snapshot fallback, settings pages, Unicode directory picker, saved monitor and audio identities, and configurable supported global shortcuts |
-| Capture and replay | Display, window and region capture, normal record/pause/resume, bounded encoded replay, independent WASAPI tracks, selected source rediscovery, monitor identity across reorders, and reconnect handling |
+| Capture and replay | Display, window and region capture, DirectShow webcam overlays, normal record/pause/resume, bounded encoded replay, independent WASAPI tracks, selected source rediscovery, monitor identity across reorders, and reconnect handling |
 | Video encoding | Software H.264 and supported NVENC H.264, HEVC and AV1; NVENC 10-bit SDR where available; explicit AMF/QSV H.264 choices; Desktop Duplication and GDI paths |
 | Streaming and screenshots | RTMP/RTMPS, WHIP, supported custom container/protocol combinations, and monitor, window and region screenshots with disk or clipboard destinations |
 | Studio | Layer project browsing, independent source tracks, playback, voiceover, and MP4 export |
@@ -192,7 +198,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | Area | Current limitation or open verification |
 | --- | --- |
 | Overlay coverage | The overlay is available over the desktop and borderless windows. Exclusive fullscreen can bypass desktop composition. Test shortcut ownership and behavior on the target game. |
-| Linux parity | Camera capture integration and inverted GSR application audio remain open. Windows uses its own capture and audio APIs. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
+| Linux parity | Inverted GSR application audio remains open. Webcam discovery and composition have automated coverage using a simulated inventory and video inputs. Physical camera capture, timing and reconnect testing remain open. Windows uses its own capture and audio APIs. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
 | GPU coverage | AMD AMF recording and replay were tested on a real Windows window and with synthetic video. Full-display and gameplay testing on AMD, physical Intel Quick Sync, multi-monitor and mixed-DPI validation remain open. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
 | Audio timing | Independently launched media producers have approximate start alignment. Broad device and workload testing for latency, drift and sync remains pending. |
 | Replay transitions | Standalone replay must be stopped before normal recording starts. Transitioning while preserving the existing replay history remains open. Effective duration is constrained by the RAM budget and retained video. |

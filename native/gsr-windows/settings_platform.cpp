@@ -42,8 +42,8 @@ int set_windows_autostart(bool enabled) {
     RegCloseKey(key);
     return status;
 }
-static std::string audio_inventory() {
-    const auto *inventory = _wgetenv(L"LAYER_GSR_AUDIO_INVENTORY");
+static std::string inventory_text(const wchar_t *variable) {
+    const auto *inventory = _wgetenv(variable);
     if (!inventory) return {};
     const int length = WideCharToMultiByte(CP_UTF8, 0, inventory, -1, nullptr, 0, nullptr, nullptr);
     if (length <= 1) return {};
@@ -55,7 +55,7 @@ static std::string audio_inventory() {
 
 std::vector<AudioDevice> get_audio_devices() {
     std::vector<AudioDevice> devices;
-    std::istringstream rows(audio_inventory());
+    std::istringstream rows(inventory_text(L"LAYER_GSR_AUDIO_INVENTORY"));
     for (std::string row; std::getline(rows, row);) {
         const auto split = row.find('\t');
         if (split != std::string::npos && starts_with(row, "device:"))
@@ -66,7 +66,7 @@ std::vector<AudioDevice> get_audio_devices() {
 
 std::vector<std::string> get_application_audio() {
     std::vector<std::string> applications;
-    std::istringstream rows(audio_inventory());
+    std::istringstream rows(inventory_text(L"LAYER_GSR_AUDIO_INVENTORY"));
     for (std::string row; std::getline(rows, row);) {
         const auto split = row.find('\t');
         if (split == std::string::npos || !starts_with(row, "app:")) continue;
@@ -75,6 +75,16 @@ std::vector<std::string> get_application_audio() {
             applications.push_back(std::move(name));
     }
     return applications;
+}
+
+std::string windows_webcam_name(std::string_view device) {
+    std::istringstream rows(inventory_text(L"LAYER_GSR_CAMERA_INVENTORY"));
+    for (std::string row; std::getline(rows, row);) {
+        const auto split = row.find('\t');
+        if (split != std::string::npos && std::string_view(row).substr(0, split) == device)
+            return row.substr(split + 1);
+    }
+    return std::string(device);
 }
 
 SupportedCaptureOptions get_supported_capture_options(const GsrInfo &) {
@@ -93,6 +103,24 @@ SupportedCaptureOptions get_supported_capture_options(const GsrInfo &) {
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&options.monitors));
+    std::istringstream rows(inventory_text(L"LAYER_GSR_CAMERA_INVENTORY"));
+    for (std::string row; std::getline(rows, row);) {
+        if (starts_with(row, "dshow:")) {
+            const auto split = row.find('\t');
+            if (split != std::string::npos)
+                options.cameras.push_back({row.substr(0, split), {}, {}});
+            continue;
+        }
+        std::istringstream mode(row);
+        std::string format;
+        GsrCameraSetup setup{};
+        if (options.cameras.empty() || !(mode >> format >> setup.resolution.x >> setup.resolution.y >> setup.fps)
+            || setup.resolution.x <= 0 || setup.resolution.y <= 0 || setup.fps <= 0)
+            continue;
+        auto &camera = options.cameras.back();
+        if (format == "yuyv") camera.yuyv_setups.push_back(setup);
+        if (format == "mjpeg") camera.mjpeg_setups.push_back(setup);
+    }
     return options;
 }
 

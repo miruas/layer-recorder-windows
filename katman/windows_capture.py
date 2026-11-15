@@ -541,7 +541,7 @@ class Capture:
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
                  color_range=None, rate_control=None, container="mp4", replay_directory=None,
                  replay_container=None, audio_codec="aac", framerate_mode=None, ten_bit=False,
-                 gsr_audio_tracks=None):
+                 gsr_audio_tracks=None, webcam=None):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -555,6 +555,7 @@ class Capture:
         self.fps = fps
         self.encoder = encoder
         self.ten_bit = ten_bit
+        self.webcam = webcam
         self.seconds = seconds
         self.memory_bytes = memory_mb * 1024**2
         self.container = recording_container({"container": container})
@@ -619,7 +620,7 @@ class Capture:
     def _duplication_target(self, source):
         # Direct RGB surfaces are encoded full-range by NVENC. Limited range
         # needs the explicit color conversion in the GDI pipeline.
-        if (self.encoder not in NVENC_ENCODERS or self.resolution is not None or self.color_range == "tv" or
+        if (self.webcam is not None or self.encoder not in NVENC_ENCODERS or self.resolution is not None or self.color_range == "tv" or
                 self.framerate_mode == "content" or source.key in self.duplication_failed or
                 source.width % 2 or source.height % 2):
             return None
@@ -647,6 +648,9 @@ class Capture:
                 set_video_color_range(command, self.color_range)
                 if self.ten_bit:
                     command[command.index("-pix_fmt") + 1] = "p010le"
+                if self.webcam is not None:
+                    from .windows_webcam import add_webcam
+                    add_webcam(command, self.webcam, self.resolution or (source.width, source.height))
             stem, timescale = "display", TIMESCALE
         else:
             from .windows_audio import AUDIO_TIMESCALE, capture_audio_command
