@@ -3,8 +3,11 @@
 The reference implementation is GPU Screen Recorder 6.1.7 under
 `upstream/gpu-screen-recorder` and the exact GSR UI revision in
 `packaging/native-lock.json` with `patches/gsr-ui-layer.patch` applied. The
-existing Windows capture and Studio binaries are usable components of the
-Windows distribution. The small Windows Alt+Z panel is provisional.
+Windows distribution includes the patched GSR overlay as the Alt+Z entry
+point, alongside the Rust capture engine and Layer Studio. The table
+tracks the port's scope and acceptance criteria. See the
+[Windows user guide](WINDOWS.md) for what ships, what has been verified,
+and which areas still need work.
 
 | Component | Windows port work | Acceptance |
 | --- | --- | --- |
