@@ -582,6 +582,12 @@ class Capture:
         self.replay_directory = Path(replay_directory).expanduser().resolve() if replay_directory else base_library
         self.library.mkdir(parents=True, exist_ok=True)
         self.record_folder = None
+        self.shared_recording = False
+        self.record_segments = {}
+        self.completed_segments = []
+        self.record_pause_time = None
+        self.record_paused_seconds = 0.0
+        self.record_segment_no = 0
         self.fps = fps
         self.encoder = encoder
         self.ten_bit = ten_bit
@@ -688,7 +694,8 @@ class Capture:
             command = capture_audio_command(source, self.audio_codec)
             stem, timescale = "audio", AUDIO_TIMESCALE
             backend = "wasapi"
-        path = self.record_folder / "media" / f"{stem}-{self.serial}.mp4" if self.record_folder else None
+        path = (self.record_folder / "media" / f"{stem}-{self.serial}.mp4"
+                if self.record_folder and not self.shared_recording else None)
         try:
             self.engine.request("start", id=self.serial, command=command, scale=timescale,
                                 media=str(path) if path else None)
@@ -699,6 +706,11 @@ class Capture:
         track = Track(self.serial, source, self.fps, path, backend=backend, duplication_target=target)
         self.tracks.append(track)
         self.active[source.key] = track
+        if self.shared_recording and not self.paused:
+            try:
+                self._attach_recording(track)
+            except (OSError, RuntimeError) as error:
+                self.warnings.append(f"{source.name}: recording could not attach ({error}).")
 
     def _try_start(self, source):
         try:
@@ -713,10 +725,12 @@ class Capture:
         error = self.engine.request("stop", id=track.id)
         if error:
             self.warnings.append(f"{track.source.name}: {error}")
+        if track.id in self.record_segments:
+            self._detach_recording(track.id)
 
     def reconcile(self, current, current_audio=None):
         """Reconcile device generations on the capture-control worker."""
-        if self.paused:
+        if self.paused and not self.shared_recording:
             return 0
         self._update_duplication_layout(current)
         desired = {display.key: display for display in current
@@ -806,6 +820,17 @@ class Capture:
     def toggle_pause(self):
         if not self.record_folder:
             raise RuntimeError("No ordinary recording is active.")
+        if self.shared_recording:
+            now = self.engine.request("clock")
+            if self.paused:
+                self._attach_active_recording(now)
+                self.record_paused_seconds += now - self.record_pause_time
+                self.record_pause_time = None
+            else:
+                self._detach_active_recording(now)
+                self.record_pause_time = now
+            self.paused = not self.paused
+            return self.paused
         if self.paused:
             current = displays()
             current_audio = None
@@ -824,6 +849,74 @@ class Capture:
             self._stop_tracks()
         return self.paused
 
+    def start_recording_in_replay(self, output, container):
+        if self.record_folder is not None:
+            raise RuntimeError("A recording is already active.")
+        container = recording_container({"container": container})
+        if "flv" == container and self.encoder in {"hevc_nvenc", "av1_nvenc"}:
+            raise ValueError("Use MP4 or MKV for this replay codec.")
+        if container == "mov" and self.encoder == "av1_nvenc":
+            raise ValueError("Use MP4 or MKV for AV1 recording.")
+        output.directory.mkdir(parents=True, exist_ok=True)
+        folder = Path(tempfile.mkdtemp(prefix=output.prefix, dir=output.directory))
+        self.record_folder = folder
+        self.recording_output = output
+        self.container = container
+        try:
+            (folder / "media").mkdir()
+            self._attach_active_recording(self.engine.request("clock"))
+        except Exception:
+            self._detach_active_recording()
+            self._reset_shared_recording()
+            shutil.rmtree(folder)
+            raise
+        self.shared_recording = True
+
+    def _attach_recording(self, track, start=0):
+        self.record_segment_no += 1
+        media = self.record_folder / "media" / f"{track.kind}-{self.record_segment_no}.mp4"
+        self.engine.request("record_attach", id=track.id, path=str(media), **{"from": start})
+        self.record_segments[track.id] = (track, media)
+
+    def _attach_active_recording(self, start):
+        try:
+            for track in self.active.values():
+                self._attach_recording(track, start)
+        except (OSError, RuntimeError):
+            self._detach_active_recording()
+            raise
+
+    def _detach_recording(self, track_id, cutoff=None):
+        track, media = self.record_segments.pop(track_id)
+        try:
+            result = self.engine.request("record_detach", id=track_id)
+        except (OSError, RuntimeError) as error:
+            self.warnings.append(f"{track.source.name}: recording could not close ({error}).")
+            return
+        if error := result["error"]:
+            self.warnings.append(f"{track.source.name}: {error}")
+        if result["started"] is None:
+            media.unlink(missing_ok=True)
+        else:
+            limit = None if cutoff is None else cutoff - self.record_paused_seconds
+            self.completed_segments.append((replace(track, paused_at=limit), media,
+                                            result["started"] - self.record_paused_seconds))
+
+    def _detach_active_recording(self, cutoff=None):
+        for track_id in tuple(self.record_segments):
+            self._detach_recording(track_id, cutoff)
+
+    def _reset_shared_recording(self):
+        self.shared_recording = False
+        self.record_folder = None
+        self.recording_output = None
+        self.paused = False
+        self.record_segments.clear()
+        self.completed_segments.clear()
+        self.record_pause_time = None
+        self.record_paused_seconds = 0.0
+        self.record_segment_no = 0
+
     def stop(self):
         self._stop_tracks()
         if self.engine:
@@ -836,6 +929,14 @@ class Capture:
             raise RuntimeError("No ordinary recording is active.")
         if self.final_project:
             return self.final_project
+        if self.shared_recording:
+            try:
+                self._detach_active_recording()
+                path = self.record_folder / "project.katman"
+                self._write_project(path, "recording", self.completed_segments, output=self.recording_output)
+                return path
+            finally:
+                self._reset_shared_recording()
         self._stop_tracks()
         try:
             state = self._status()

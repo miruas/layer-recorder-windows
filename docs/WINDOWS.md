@@ -42,7 +42,7 @@ To exclude applications, use **Record audio from all applications except the sel
 2. Use **Alt+F7** or the overlay's **Pause** action to pause and resume. The paused interval is omitted from the project timeline.
 3. Stop from the same card, press **Alt+F9** while recording, or use **Stop** in the recorder. Let Layer finish writing the project before moving its files.
 
-Normal recording keeps replay available. If a standalone Instant Replay session is already running, stop that session before starting a normal recording. Saved replay clips are separate projects.
+Normal recording keeps replay available. While standalone Instant Replay is running, use the Record card, **Alt+F9** or **Start recording** to write a normal recording from the same sources. The recording inherits the replay session's capture and encoding options and starts at the next eligible encoded fragment. Record pause, resume and stop affect the recording while replay continues. Stop replay first if you need to change the capture source or encoder. Saved replays and recordings are separate projects.
 
 ### Save a replay
 
@@ -211,7 +211,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | Linux parity | Inverted application audio uses Windows sessions and process trees. Complete parity for shared process trees remain open. Webcam discovery and composition have automated coverage using a simulated inventory and video inputs. Physical camera capture, timing and reconnect testing remain open. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
 | GPU coverage | AMD AMF recording and replay were tested on a real Windows window and with synthetic video. Full-display and gameplay testing on AMD, physical Intel Quick Sync, multi-monitor and mixed-DPI validation remain open. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
 | Audio timing | Independently launched media producers have approximate start alignment. Broad device and workload testing for latency, drift and sync remains pending. |
-| Replay transitions | Standalone replay must be stopped before normal recording starts. Transitioning while preserving the existing replay history remains open. Effective duration is constrained by the RAM budget and retained video. |
+| Replay transitions | Recording within replay preserves the buffer and uses its existing sources. Changing capture settings requires restarting the replay session. The recording starts at a fragment boundary, and effective replay duration is constrained by the RAM budget and retained video. |
 | Automatic game detection | Windows currently uses Steam's running-game data. Other launchers and standalone games remain outside automatic detection. |
 | Voice field testing | Language support is English. The current wake phrase match follows voice-activity-gated transcription. Live-speaker accuracy across voices, accents, microphones and gameplay noise, along with false-trigger rates and in-game FPS and audio-sync impact, has not been systematically measured. |
 | Stream compatibility | Service profiles and the verified receiver combinations are covered above. Every allowed container/protocol pair and production service configuration has not been tested. |

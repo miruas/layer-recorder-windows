@@ -57,6 +57,7 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     page.draw(window);
     // Original four-column layout at 480x360: 72px cards centered at y=90.
     for (const int x : {132, 204, 276, 348}) {
+        if (x == 204) page.set_capture_state(false, true);
         send(WM_MOUSEMOVE, x, 90);
         send(WM_LBUTTONDOWN, x, 90);
         send(WM_LBUTTONUP, x, 90);

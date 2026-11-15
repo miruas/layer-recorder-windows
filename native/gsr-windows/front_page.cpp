@@ -64,7 +64,6 @@ void WindowsFrontPage::set_capture_state(bool recording, bool replay, bool pause
     record_dropdown_button_ptr->set_item_label("pause", paused ? TR("Unpause") : TR("Pause"));
     record_dropdown_button_ptr->set_item_icon("pause", paused ? &theme.play_texture : &theme.pause_texture);
     record_dropdown_button_ptr->set_activated(recording);
-    record_dropdown_button_ptr->set_item_enabled("start", recording || !replay);
     record_dropdown_button_ptr->set_item_label("start", recording ? TR("Stop and save") : TR("Start"));
     record_dropdown_button_ptr->set_item_icon("start", recording ? &theme.stop_texture : &theme.play_texture);
     replay_dropdown_button_ptr->set_description(replay ? TR("On") : TR("Off"));

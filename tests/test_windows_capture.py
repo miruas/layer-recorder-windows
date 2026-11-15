@@ -23,7 +23,7 @@ from katman.windows_audio import (
     mix_live_audio,
 )
 from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
-from katman.windows_output import capture_output, safe_component
+from katman.windows_output import CaptureOutput, capture_output, safe_component
 from katman.windows_screenshot import capture_monitor, save_image, screenshot_source
 from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 from katman.windows_tray import capture_notification
@@ -570,6 +570,35 @@ def wait_fragments(test, capture, track, count=1):
 @unittest.skipUnless(capture_binary().is_file() and shutil.which("ffmpeg") and shutil.which("ffprobe"),
                      "The Rust capture engine and FFmpeg are required")
 class ProjectTests(unittest.TestCase):
+    def test_recording_in_replay_reuses_tracks_and_keeps_the_buffer_running(self):
+        display = Display("Fixture", 0, 0, 96, 64, True)
+        with (tempfile.TemporaryDirectory() as folder,
+              patch("katman.windows_capture.capture_command", synthetic_video)):
+            directory = Path(folder)
+            capture = Capture(directory, [display], fps=10, seconds=20)
+            try:
+                track = capture.active[display.key]
+                wait_fragments(self, capture, track, 2)
+                capture.start_recording_in_replay(CaptureOutput(directory, "Recording-"), "mp4")
+                before = capture._status()[track.id]["count"]
+                wait_fragments(self, capture, track, before + 3)
+                self.assertTrue(capture.toggle_pause())
+                paused = capture._status()[track.id]["count"]
+                wait_fragments(self, capture, track, paused + 2)
+                self.assertFalse(capture.toggle_pause())
+                resumed = capture._status()[track.id]["count"]
+                wait_fragments(self, capture, track, resumed + 3)
+                path, recording = load_project(capture.finish_recording())
+                self.assertTrue(path.parent.name.startswith("Recording-"))
+                self.assertEqual(len(recording["sources"]), 2)
+                self.assertLess(recording["duration"], capture.replay_status()[0] - 1)
+                self.assertIs(capture.active[display.key], track)
+                self.assertIsNone(capture.record_folder)
+                _, replay = load_project(capture.save_replay(2, require_full_duration=True))
+                self.assertAlmostEqual(replay["duration"], 2, places=2)
+            finally:
+                capture.stop()
+
     def test_webcam_composition_places_camera_in_output_frame(self):
         camera = gsr_webcam({"webcam_source": "dshow:Fixture", "webcam_x": 75, "webcam_y": 75,
                              "webcam_width": 25, "webcam_height": 25,

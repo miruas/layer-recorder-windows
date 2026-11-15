@@ -13,6 +13,7 @@ def capture_notification(action, value, previous_mode, read_settings):
     """Describe successful capture actions using the active GSR profile's preference."""
     messages = {
         "record": ("record", "Recording started"),
+        "record_in_replay": ("record", "Recording started"),
         "pause": ("record", "Recording paused" if value else "Recording resumed"),
         "replay": ("replay", "Instant Replay started"),
         "automatic_replay": ("replay", "Instant Replay started"),
@@ -21,7 +22,7 @@ def capture_notification(action, value, previous_mode, read_settings):
         "stream_stop": ("streaming", "Livestream stopped"),
         "screenshot": ("screenshot", "Screenshot saved" if value else "Screenshot copied to clipboard"),
     }
-    if action == "stop":
+    if action in {"stop", "stop_record_in_replay"}:
         if previous_mode == "record":
             section, message = "record", "Recording saved"
         elif previous_mode == "replay":
@@ -37,7 +38,7 @@ def capture_notification(action, value, previous_mode, read_settings):
     options = settings if section == "screenshot" else settings.get("record_options")
     if isinstance(options, dict) and options.get("show_notifications") is False:
         return None
-    if action in {"save", "screenshot", "stop"} and isinstance(value, (str, Path)):
+    if action in {"save", "screenshot", "stop", "stop_record_in_replay"} and isinstance(value, (str, Path)):
         path = Path(value)
         label = path.parent.name if path.name == "project.katman" else path.name
         if label:

@@ -375,6 +375,14 @@ def capture_controls(library, *, background=False):
 
     def start(kind, *, use_gsr=False, window_handle=None, region=None, force_window=False, automatic=False):
         nonlocal replay_save_lengths
+        if kind == "record" and mode == "replay":
+            session = capture
+            settings = gsr_settings("record") if use_gsr else {}
+            output = capture_output(settings, gsr_save_directory(settings, library), "Layer-recording-",
+                                    foreground_window() if window_handle is None else window_handle)
+            status.set("Starting recording from the active replay…")
+            submit("record_in_replay", lambda: session.start_recording_in_replay(output, recording_container(settings)))
+            return
         selected = [display for display, flag in options if flag.get()]
         rate, codec = int(fps.get()), encoder.get()
         seconds = 300
@@ -481,6 +489,9 @@ def capture_controls(library, *, background=False):
 
     def stop():
         status.set("Finishing capture…")
+        if capture.shared_recording:
+            submit("stop_record_in_replay", capture.finish_recording)
+            return
         submit("stop", capture.finish_recording if mode == "record" else capture.stop)
 
     def save(seconds, *, require_full_duration=False, window_handle=None):
@@ -754,8 +765,11 @@ def capture_controls(library, *, background=False):
                           force_window=action == "toggle_window_record")
             elif mode == "record":
                 stop()
+            elif action in {"toggle_record", "gsr_toggle_record"}:
+                start("record", use_gsr=from_overlay or action == "gsr_toggle_record",
+                      window_handle=overlay_window if from_overlay else None)
             else:
-                status.set("Stop replay before starting a normal recording.")
+                status.set("Stop replay to change the capture source.")
         elif action in {"toggle_replay", "gsr_toggle_replay"}:
             if capture is None:
                 start("replay", use_gsr=from_overlay or action == "gsr_toggle_replay",
@@ -819,7 +833,8 @@ def capture_controls(library, *, background=False):
     def update_buttons():
         idle = not busy and capture is None
         active = not busy and capture is not None
-        for control in (record_button, replay_button, refresh_button, *monitor_panel.winfo_children()):
+        record_button.configure(state="normal" if idle or (active and mode == "replay") else "disabled")
+        for control in (replay_button, refresh_button, *monitor_panel.winfo_children()):
             control.configure(state="normal" if idle else "disabled")
         for control in (fps_field, encoder_field):
             control.configure(state="readonly" if idle else "disabled")
@@ -887,6 +902,11 @@ def capture_controls(library, *, background=False):
                 next_inventory = next_audio_inventory = 0.0
                 active_display_count = None
                 status.set("Recording · Replay is also active" if mode == "record" else "Replay active")
+            if action == "record_in_replay" and error is None:
+                mode = "record"
+                status.set("Recording · Replay is also active")
+            if action == "stop_record_in_replay":
+                mode = "replay"
             if action == "stop":
                 capture, mode = None, None
                 replay_autostart.owns_replay = False
@@ -922,7 +942,7 @@ def capture_controls(library, *, background=False):
                 status.set(error)
                 if action in {"record", "replay", "stream_start"}:
                     show()
-                if action == "stop":
+                if action in {"stop", "stop_record_in_replay"}:
                     closing = False
             elif action == "pause":
                 status.set("Recording paused." if value else "Recording resumed.")
@@ -975,7 +995,7 @@ def capture_controls(library, *, background=False):
         if not busy and not closing and now >= next_power_check:
             next_power_check = now + 2
             check_replay_startup()
-        if capture is not None and not capture.paused and not busy and now >= next_inventory:
+        if capture is not None and (not capture.paused or capture.shared_recording) and not busy and now >= next_inventory:
             next_inventory = now + 1
             inspect_audio = (capture.audio or capture.follow_application_audio or
                              capture.gsr_audio_tracks) and now >= next_audio_inventory
@@ -1010,7 +1030,7 @@ def capture_controls(library, *, background=False):
         settings = gsr_settings("replay")
         trigger = replay_autostart_trigger(settings, running_steam_game, ac_power_connected)
         action = replay_autostart.update(trigger, idle=capture is None and stream is None)
-        if action == "stop":
+        if action == "stop" and mode != "record":
             stop()
         elif action == "start":
             options = settings.get("record_options")

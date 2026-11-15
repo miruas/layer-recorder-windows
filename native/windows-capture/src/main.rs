@@ -155,6 +155,41 @@ struct Ring {
     init: Vec<Arc<Vec<u8>>>,
     fragments: VecDeque<Arc<Fragment>>,
     error: Option<String>,
+    recording: Option<Arc<Mutex<LiveRecording>>>,
+}
+
+struct LiveRecording {
+    output: Option<BufWriter<File>>,
+    from: f64,
+    first: Option<(f64, u64)>,
+    error: Option<String>,
+}
+
+impl LiveRecording {
+    fn append(&mut self, init: &[Arc<Vec<u8>>], fragment: &Fragment, start: f64) -> Result<()> {
+        let Some(output) = &mut self.output else {
+            return Ok(());
+        };
+        if start < self.from {
+            return Ok(());
+        }
+        if self.first.is_none() {
+            for data in init {
+                output.write_all(data)?;
+            }
+            self.first = Some((start, fragment.timestamp));
+        }
+        fragment.write(output, self.first.unwrap().1)
+    }
+
+    fn finish(&mut self) -> Value {
+        if let Some(mut output) = self.output.take() {
+            if let Err(error) = output.flush() {
+                self.error.get_or_insert_with(|| error.to_string());
+            }
+        }
+        json!({"started": self.first.map(|(start, _)| start), "error": self.error})
+    }
 }
 
 struct Buffer {
@@ -250,13 +285,27 @@ fn ingest(
                     start,
                     end: start + duration,
                 };
-                let mut buffer = state.lock().unwrap();
-                let now = buffer.now();
-                buffer.bytes += fragment.bytes();
-                let ring = buffer.rings.get_mut(&id).unwrap();
-                ring.started.get_or_insert_with(|| launched.max(now - 1.0));
-                ring.fragments.push_back(Arc::new(fragment));
-                buffer.trim();
+                let fragment = Arc::new(fragment);
+                let live_recording = {
+                    let mut buffer = state.lock().unwrap();
+                    let now = buffer.now();
+                    buffer.bytes += fragment.bytes();
+                    let ring = buffer.rings.get_mut(&id).unwrap();
+                    let origin = *ring.started.get_or_insert_with(|| launched.max(now - 1.0));
+                    let recording = ring.recording.as_ref().map(|sink| {
+                        (sink.clone(), ring.init.clone(), origin + fragment.start)
+                    });
+                    ring.fragments.push_back(fragment.clone());
+                    buffer.trim();
+                    recording
+                };
+                if let Some((sink, init, start)) = live_recording {
+                    let mut sink = sink.lock().unwrap();
+                    if let Err(error) = sink.append(&init, &fragment, start) {
+                        sink.error = Some(format!("{error:#}"));
+                        sink.output = None;
+                    }
+                }
             }
             _ => {}
         }
@@ -437,6 +486,30 @@ fn handle(
     children: &mut BTreeMap<u64, Producer>,
 ) -> Result<Value> {
     match request["op"].as_str().unwrap_or_default() {
+        "clock" => Ok(json!(state.lock().unwrap().now())),
+        "record_attach" => {
+            let id = id_of(&request)?;
+            let from = request["from"].as_f64().context("Missing recording start")?;
+            let path = request["path"].as_str().context("Missing recording path")?;
+            let file = File::options().write(true).create_new(true).open(path)?;
+            let mut buffer = state.lock().unwrap();
+            let ring = buffer.rings.get_mut(&id).context("Unknown track")?;
+            ensure!(ring.recording.is_none(), "Track is already recording");
+            ring.recording = Some(Arc::new(Mutex::new(LiveRecording {
+                output: Some(BufWriter::with_capacity(256 * 1024, file)),
+                from,
+                first: None,
+                error: None,
+            })));
+            Ok(Value::Null)
+        }
+        "record_detach" => {
+            let id = id_of(&request)?;
+            let slot = state.lock().unwrap().rings.get_mut(&id)
+                .context("Unknown track")?.recording.take().context("Track is not recording")?;
+            let result = slot.lock().unwrap().finish();
+            Ok(result)
+        }
         "pause_clock" => {
             let mut state = state.lock().unwrap();
             state.paused_at.get_or_insert_with(Instant::now);
