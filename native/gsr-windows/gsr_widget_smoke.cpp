@@ -73,9 +73,10 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     info.system_info.supports_app_audio = true;
     const std::vector<std::string> saved_inputs = {"device:system:disconnected.monitor", "app:offline.exe"};
     const std::string disconnected_monitor = R"(\\.\DISPLAY99)";
+    const std::string disconnected_identity = R"(\\?\DISPLAY#DISCONNECTED#instance)";
     config.record_config.record_options.audio_tracks_list = {{"", saved_inputs, false}};
     config.record_config.record_options.record_area_option = disconnected_monitor;
-    config.screenshot_config.record_area_option = disconnected_monitor;
+    config.screenshot_config.record_area_option = disconnected_identity;
     gsr::PageStack stack;
     using Type = gsr::SettingsPage::Type;
     for (auto type : {Type::RECORD, Type::REPLAY, Type::STREAM}) {
@@ -90,7 +91,7 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     const auto &saved_tracks = record_options.audio_tracks_list;
     return stack.empty() && saved_tracks.size() == 1 && saved_tracks.front().audio_inputs == saved_inputs &&
         record_options.record_area_option == disconnected_monitor &&
-        config.screenshot_config.record_area_option == disconnected_monitor;
+        config.screenshot_config.record_area_option == disconnected_identity;
 }
 
 static int test(const std::string &resources) {

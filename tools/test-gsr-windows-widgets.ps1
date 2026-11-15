@@ -45,11 +45,17 @@ foreach ($page in @(
     $target = $page.Target
     $selection = "record_area_box_ptr->set_selected_item($target);"
     $replacement = @"
-if(starts_with($target, R"(\\.\)"))
-            record_area_box_ptr->add_item(TR("Disconnected monitor"), $target, false);
-        $selection
+const auto monitor_target = windows_monitor_target($target);
+        if(starts_with(monitor_target, R"(\\.\)") || starts_with(monitor_target, R"(\\?\)"))
+            record_area_box_ptr->add_item(TR("Disconnected monitor"), monitor_target, false);
+        record_area_box_ptr->set_selected_item(monitor_target);
 "@
-    Set-Content -LiteralPath $page.Path -Value ($page.Code.Replace($selection, $replacement)) -Encoding utf8
+    $code = $page.Code.Replace($selection, $replacement)
+    $code = $code.Replace('namespace gsr {', 'namespace gsr {' + [Environment]::NewLine +
+        '    std::string windows_monitor_target(const std::string &name);')
+    $code = $code.Replace('record_area_box->add_item(name, monitor.name);',
+        'record_area_box->add_item(name, windows_monitor_target(monitor.name));')
+    Set-Content -LiteralPath $page.Path -Value $code -Encoding utf8
 }
 $includes = @("-I$mgl/include", "-I$pp/include", "-I$source/include", "-I$port", "-I$build")
 $pango = (& $pkg --cflags pangoft2 gio-2.0) -split ' ' | Where-Object { $_ }

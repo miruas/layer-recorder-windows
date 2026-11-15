@@ -16,10 +16,21 @@ from katman.windows_capture import (
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
 from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
-from katman.windows_screenshot import screenshot_source
+from katman.windows_screenshot import capture_monitor, screenshot_source
 
 
 class ReplayTests(unittest.TestCase):
+    def test_saved_windows_monitor_id_survives_display_number_changes(self):
+        identity = r"\\?\DISPLAY#MONITOR_A#instance"
+        replacement = Display("DISPLAY1", 0, 0, 1920, 1080, True, r"\\?\DISPLAY#MONITOR_B#instance")
+        original = Display("DISPLAY3", -1920, 0, 1920, 1080, False, identity)
+        with patch("katman.windows_screenshot.displays", return_value=[replacement, original]) as monitors:
+            self.assertEqual(capture_monitor(identity.lower()), original)
+            self.assertEqual(capture_monitor(r"\\.\DISPLAY1"), replacement)
+            monitors.return_value = [replacement]
+            with self.assertRaisesRegex(RuntimeError, "disconnected"):
+                capture_monitor(identity)
+
     def test_gsr_audio_tracks_follow_selected_app_when_its_pid_changes(self):
         display = Display("DISPLAY1", 0, 0, 320, 240)
         first = AudioSource("app:123", "game.exe (PID 123)", "application", pid=123)

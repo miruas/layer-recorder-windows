@@ -96,6 +96,17 @@ SupportedCaptureOptions get_supported_capture_options(const GsrInfo &) {
     return options;
 }
 
+std::string windows_monitor_target(const std::string &name) {
+    if (!starts_with(name, R"(\\.\)")) return name;
+    const auto device_name = std::filesystem::u8path(name).wstring();
+    DISPLAY_DEVICEW device{};
+    device.cb = sizeof(device);
+    if (!EnumDisplayDevicesW(device_name.c_str(), 0, &device, EDD_GET_DEVICE_INTERFACE_NAME) ||
+        !device.DeviceID[0])
+        return name;
+    return std::filesystem::path(device.DeviceID).u8string();
+}
+
 std::string get_parent_directory(std::string_view directory) {
     const auto path = std::filesystem::u8path(directory);
     const auto parent = path.parent_path();

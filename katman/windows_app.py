@@ -22,7 +22,7 @@ from .windows_capture import (
     video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
-from .windows_screenshot import capture_monitor, gsr_settings
+from .windows_screenshot import capture_monitor, gsr_settings, is_monitor_target
 
 ENCODERS = ("libx264", "h264_nvenc", "h264_amf", "h264_qsv")
 
@@ -375,7 +375,7 @@ def capture_controls(library, *, background=False):
                 if target == "region":
                     launch_overlay("region", region_capture=kind)
                     return
-                if isinstance(target, str) and (target == "focused_monitor" or target.startswith("\\\\.\\")):
+                if target == "focused_monitor" or is_monitor_target(target):
                     try:
                         selected = [capture_monitor(target)]
                         chosen_monitor = True

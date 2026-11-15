@@ -41,13 +41,19 @@ def screenshot_source(settings, target, *, window_handle=None):
     return desktop_source(monitor.x, monitor.y, monitor.width, monitor.height)
 
 
+def is_monitor_target(source):
+    return isinstance(source, str) and source.startswith(("\\\\.\\", "\\\\?\\"))
+
+
 def capture_monitor(source):
     monitors = displays()
     if not monitors:
         raise RuntimeError("No active monitor to capture.")
-    monitor = next((item for item in monitors if source == "\\\\.\\" + item.name), None)
+    monitor = next((item for item in monitors if is_monitor_target(source) and source.casefold() in (
+        ("\\\\.\\" + item.name).casefold(), item.device_id.casefold()
+    )), None)
     if monitor is None:
-        if isinstance(source, str) and source.startswith("\\\\.\\"):
+        if is_monitor_target(source):
             raise RuntimeError("The monitor selected in GSR is disconnected.")
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         point = wintypes.POINT()

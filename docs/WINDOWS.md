@@ -56,6 +56,8 @@ GSR's **Limited** color range uses GDI capture with explicit range conversion be
 
 A selected recording or replay region follows its original display when Windows moves that display. If the display disconnects, the region resumes when that display returns and the region fits on it.
 
+When you save a specific monitor in GSR, Layer uses the Windows monitor interface ID so the selection survives changes to the display number. Older display-number settings remain readable.
+
 ## Edit and export
 
 Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` directory together. Choose **Open editor** to browse the library or open an existing project. Studio mixes enabled audio tracks during timeline playback. **Record voiceover** captures the selected microphone and inserts a separate audio clip at the playhead.
