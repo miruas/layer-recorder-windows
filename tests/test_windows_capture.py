@@ -53,6 +53,7 @@ class ReplayTests(unittest.TestCase):
         display = Display("DISPLAY1", 0, 0, 1920, 1080, True)
         command = desktop_duplication_command(display, 30, display, (0, 0))
         with (patch("katman.windows_stream.stream_video_command", return_value=command),
+              patch.object(subprocess, "CREATE_NO_WINDOW", 0, create=True),
               patch("katman.windows_stream.subprocess.Popen") as start,
               patch("katman.windows_stream.threading.Thread", return_value=Mock())):
             Livestream(display, 30, "h264_nvenc", CustomDestination("test.mp4", "mp4"), audio=[object()])
@@ -64,6 +65,7 @@ class ReplayTests(unittest.TestCase):
     def test_video_only_nvenc_stream_probes_dxgi_before_publishing(self):
         display = Display("DISPLAY1", 0, 0, 1920, 1080, True)
         with (patch("katman.windows_stream.displays", return_value=[display]),
+              patch.object(subprocess, "CREATE_NO_WINDOW", 0, create=True),
               patch("katman.windows_stream.dxgi_targets", return_value={"display1": (1, 2)}),
               patch("katman.windows_stream.subprocess.run") as run):
             command = stream_video_command(display, 60, "h264_nvenc", None, False, None, None, None)
