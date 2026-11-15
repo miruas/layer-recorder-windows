@@ -89,9 +89,15 @@ static bool test_front_page(mgl::Window &window, gsr::Config &config, gsr::GsrIn
     stack.pop();
     const auto &record_options = config.record_config.record_options;
     const auto &saved_tracks = record_options.audio_tracks_list;
-    return stack.empty() && saved_tracks.size() == 1 && saved_tracks.front().audio_inputs == saved_inputs &&
-        record_options.record_area_option == disconnected_monitor &&
-        config.screenshot_config.record_area_option == disconnected_identity;
+    if (!stack.empty() || saved_tracks.size() != 1 || saved_tracks.front().audio_inputs != saved_inputs ||
+        record_options.record_area_option != disconnected_monitor ||
+        config.screenshot_config.record_area_option != disconnected_identity)
+        return false;
+
+    auto restored = gsr::read_config(gsr::get_supported_capture_options(info));
+    return restored && restored->record_config.record_options.record_area_option == disconnected_monitor &&
+        restored->screenshot_config.record_area_option == disconnected_identity &&
+        restored->record_config.record_options.audio_tracks_list == saved_tracks;
 }
 
 static int test(const std::string &resources) {
