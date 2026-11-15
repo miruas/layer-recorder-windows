@@ -435,6 +435,7 @@ class Track:
     stopped: bool = False
     backend: str = "gdigrab"
     duplication_target: tuple | None = None
+    paused_at: float | None = None
 
     @property
     def kind(self):
@@ -446,8 +447,10 @@ def replay_video_bounds(snapshots):
     if not video:
         return None
     first = min(row["started"] + row["first"] for _, row in video)
-    ends = [(track, row["started"] + (row["end"] if "end" in row else row["last"] + 1))
-            for track, row in video]
+    ends = []
+    for track, row in video:
+        end = row["started"] + (row["end"] if "end" in row else row["last"] + 1)
+        ends.append((track, min(end, track.paused_at) if track.paused_at is not None else end))
     live = [end for track, end in ends if not track.stopped]
     return first, min(live) if live else max(end for _, end in ends)
 
@@ -463,6 +466,8 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
         except (OSError, subprocess.SubprocessError, KeyError, ValueError, StopIteration) as error:
             warnings.append(f"{track.source.name}: saved media could not be read ({error}).")
             continue
+        if track.paused_at is not None:
+            available = min(available, track.paused_at - start)
         if available <= 0:
             continue
         if track.kind == "video":
@@ -752,7 +757,9 @@ class Capture:
             self.retry_at.clear()
             self.reconcile(current, current_audio)
         else:
-            self.engine.request("pause_clock")
+            paused_at = self.engine.request("pause_clock")
+            for track in self.active.values():
+                track.paused_at = paused_at
             self.paused = True
             self._stop_tracks()
         return self.paused

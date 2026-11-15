@@ -438,12 +438,9 @@ fn handle(
 ) -> Result<Value> {
     match request["op"].as_str().unwrap_or_default() {
         "pause_clock" => {
-            state
-                .lock()
-                .unwrap()
-                .paused_at
-                .get_or_insert_with(Instant::now);
-            Ok(Value::Null)
+            let mut state = state.lock().unwrap();
+            state.paused_at.get_or_insert_with(Instant::now);
+            Ok(json!(state.now()))
         }
         "resume_clock" => {
             let mut state = state.lock().unwrap();
