@@ -52,6 +52,8 @@ GSR's **Audio codec** setting applies to the independent audio tracks for Record
 
 Rotated displays use GDI capture to keep the desktop orientation and region coordinates correct. NVENC still handles encoding when selected.
 
+A selected recording or replay region follows its original display when Windows moves that display. If the display disconnects, the region resumes when that display returns and the region fits on it.
+
 ## Edit and export
 
 Projects default to `~/Videos/Layer`. Keep `project.katman` and its `media` directory together. Choose **Open editor** to browse the library or open an existing project. Studio mixes enabled audio tracks during timeline playback. **Record voiceover** captures the selected microphone and inserts a separate audio clip at the playhead.

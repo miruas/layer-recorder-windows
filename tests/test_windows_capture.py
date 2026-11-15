@@ -19,6 +19,28 @@ from katman.windows_stream import CustomDestination, Livestream, stream_video_co
 
 
 class ReplayTests(unittest.TestCase):
+    def test_region_follows_original_monitor_after_reorder_or_disconnect(self):
+        original = Display("DISPLAY1", 0, 0, 1920, 1080, True, "original")
+        replacement = Display("DISPLAY2", 0, 0, 1920, 1080, True, "other")
+        moved = Display("DISPLAY3", -1920, 0, 1920, 1080, False, "original")
+        region = Display("Selected region", 64, 48, 640, 360)
+        with (tempfile.TemporaryDirectory() as folder,
+              patch("katman.windows_capture.displays", return_value=[original]),
+              patch("katman.windows_capture.shutil.which", return_value="ffmpeg"),
+              patch("katman.windows_capture.CaptureEngine") as engine):
+            engine.return_value.request.return_value = None
+            capture = Capture(folder, [region], fixed_region=region, record=True)
+            try:
+                first = capture.active[region.key]
+                self.assertEqual(capture.reconcile([replacement]), 0)
+                self.assertTrue(first.stopped)
+                self.assertEqual(capture.reconcile([replacement, moved]), 1)
+                track = capture.active[region.key]
+                self.assertNotEqual(first.id, track.id)
+                self.assertEqual((track.source.x, track.source.y), (-1856, 48))
+            finally:
+                capture.stop()
+
     def test_rotated_outputs_are_not_used_for_desktop_duplication(self):
         with patch("katman.windows_capture.subprocess.run") as run:
             run.return_value.stdout = b"""[

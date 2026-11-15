@@ -156,9 +156,7 @@ def stream_video_command(display, fps, encoder, resolution, cursor, color_range,
             framerate_mode != "content" and not display.window and display.width % 2 == display.height % 2 == 0):
         try:
             monitor = next((monitor for monitor in displays() if display == monitor or (
-                display.name == "Selected region" and monitor.x <= display.x and monitor.y <= display.y and
-                display.x + display.width <= monitor.x + monitor.width and
-                display.y + display.height <= monitor.y + monitor.height)), None)
+                display.name == "Selected region" and monitor.contains(display))), None)
             target = dxgi_targets().get(monitor.name.casefold()) if monitor else None
             if target is not None:
                 command = desktop_duplication_command(display, fps, monitor, target)

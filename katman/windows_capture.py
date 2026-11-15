@@ -3,7 +3,7 @@
 import ctypes
 from collections import deque
 from ctypes import wintypes
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 import json
@@ -85,6 +85,11 @@ class Display:
     @property
     def key(self):
         return self.device_id or self.name
+
+    def contains(self, region):
+        return (self.x <= region.x and self.y <= region.y and
+                region.x + region.width <= self.x + self.width and
+                region.y + region.height <= self.y + self.height)
 
 
 def displays():
@@ -530,6 +535,7 @@ class Capture:
         self.audio = {source.key: source for source in audio}
         self.follow_displays = follow_displays
         self.fixed_region = fixed_region
+        self.region_monitor = None
         self.resolution = resolution
         self.cursor = cursor
         self.color_range = color_range
@@ -547,9 +553,12 @@ class Capture:
         self.duplication_failed = set()
         self.duplication_layout = ()
         self.duplication_targets = {}
-        if encoder in NVENC_ENCODERS:
+        if encoder in NVENC_ENCODERS or fixed_region is not None:
             try:
-                self._update_duplication_layout(displays())
+                current = displays()
+                self._update_duplication_layout(current)
+                if fixed_region is not None:
+                    self.region_monitor = next((monitor for monitor in current if monitor.contains(fixed_region)), None)
             except OSError:
                 pass
         try:
@@ -581,9 +590,8 @@ class Capture:
         for monitor in self.duplication_layout:
             target = self.duplication_targets.get(monitor.name.casefold())
             if target is not None and (source == monitor or (
-                    source == self.fixed_region and monitor.x <= source.x and monitor.y <= source.y and
-                    source.x + source.width <= monitor.x + monitor.width and
-                    source.y + source.height <= monitor.y + monitor.height)):
+                    self.region_monitor is not None and monitor.key == self.region_monitor.key and
+                    source.key == self.fixed_region.key and monitor.contains(source))):
                 return monitor, target
         return None
 
@@ -644,10 +652,13 @@ class Capture:
                    if self.follow_displays or display.key in self.selected}
         if self.fixed_region is not None:
             region = self.fixed_region
-            # Keep the region only while a monitor contains its full rectangle.
-            if any(display.x <= region.x and display.y <= region.y and
-                   region.x + region.width <= display.x + display.width and
-                   region.y + region.height <= display.y + display.height for display in current):
+            if self.region_monitor is None:
+                self.region_monitor = next((monitor for monitor in current if monitor.contains(region)), None)
+            anchor = self.region_monitor
+            monitor = next((monitor for monitor in current if anchor and monitor.key == anchor.key), None)
+            if monitor:
+                region = replace(region, x=region.x + monitor.x - anchor.x, y=region.y + monitor.y - anchor.y)
+            if monitor and monitor.contains(region):
                 desired[region.key] = region
         for window in self.fixed_windows:
             try:
