@@ -84,6 +84,9 @@ Record, Replay and disk screenshots honor application folder and naming
 preferences. Windows resolves application identity from the selected or
 foreground window's process. Games-only naming recognizes Steam library
 install paths.
+The Windows notification-area icon delivers capture notifications using the
+GSR preference for each profile. The recorder continues to show the result
+in its status area when Windows suppresses a notification.
 Record, Replay and Livestream honor the configured output resolution. Odd
 dimensions round up to even sizes for H.264. Resizing uses the GDI capture
 path with the selected encoder.

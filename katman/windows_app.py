@@ -142,7 +142,7 @@ def capture_controls(library, *, background=False):
     import tkinter as tk
     from tkinter import filedialog, ttk
 
-    from .windows_tray import RecorderInstance, create_tray
+    from .windows_tray import RecorderInstance, capture_notification, create_tray
     from .voice_control import VoiceConfig, load_config, save_config
     from .windows_voice import VoiceListener, local_model
     from .windows_voice_settings import show_voice_settings
@@ -867,6 +867,13 @@ def capture_controls(library, *, background=False):
             pass
         else:
             busy = False
+            if error is None and tray_ready and tray_ready.is_set() and tray.visible and tray.HAS_NOTIFICATION:
+                if message := capture_notification(action, value, mode, gsr_settings):
+                    try:
+                        tray.notify(message, "Layer Recorder")
+                    except (OSError, RuntimeError, ValueError):
+                        # Capture has already succeeded even if Explorer cannot show a notification.
+                        pass
             if action == "stream_start" and error is None:
                 stream = value
                 status.set("Livestream running.")

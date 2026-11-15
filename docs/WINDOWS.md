@@ -21,6 +21,8 @@ Layer Recorder brings the Layer-patched GPU Screen Recorder (GSR) overlay and La
 
 Closing the recorder window leaves Layer in the notification area when the tray is available. A second launch opens the existing window. To finish a capture and close the background process, use **Exit Layer** in the tray menu. Before upgrading, exit the running instance and run the new Setup. Setup reads the current launch-at-sign-in preference when upgrading. Remove the application through **Settings → Apps → Installed apps**. Projects and preferences are stored separately from the installed program.
 
+The recorder uses Windows notifications for capture activity and saved recordings, replays and screenshots. Each GSR profile has its own **Show notifications** setting. Windows notification settings control whether the alert appears on screen.
+
 The workflow also produces a **Layer-Windows-x64** portable artifact for source-style use. Its startup and dependencies are covered under [Build from source](#build-from-source).
 
 ## Record and save Instant Replay

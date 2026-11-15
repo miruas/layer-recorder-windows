@@ -26,9 +26,31 @@ from katman.windows_stream import CustomDestination, Livestream, stream_frame_ra
 from katman.windows_output import capture_output, safe_component
 from katman.windows_screenshot import capture_monitor, save_image, screenshot_source
 from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
+from katman.windows_tray import capture_notification
 
 
 class ReplayTests(unittest.TestCase):
+    def test_capture_notifications_follow_the_respective_gsr_profiles(self):
+        settings = {
+            "record": {"record_options": {"show_notifications": False}},
+            "replay": {"record_options": {"show_notifications": True}},
+            "screenshot": {"show_notifications": False},
+            "streaming": {},
+        }
+        project = Path("Layer-game") / "project.katman"
+        notifications = lambda action, value=None, mode=None: capture_notification(action, value, mode, settings.get)
+        self.assertIsNone(notifications("record"))
+        self.assertIsNone(notifications("stop", project, "record"))
+        self.assertIsNone(notifications("screenshot", Path("Screenshot.png")))
+        self.assertEqual(notifications("save", project), "Instant Replay saved\nLayer-game")
+        self.assertEqual(notifications("stop", mode="replay"), "Instant Replay stopped")
+        self.assertEqual(notifications("stream_start"), "Livestream started")
+        settings["screenshot"]["show_notifications"] = True
+        self.assertEqual(notifications("screenshot"), "Screenshot copied to clipboard")
+        settings["record"]["record_options"]["show_notifications"] = True
+        self.assertEqual(notifications("pause", True, "record"), "Recording paused")
+        self.assertIsNone(notifications("export", Path("export.mp4")))
+
     def test_capture_naming_honors_independent_folder_and_game_only_settings(self):
         settings = {"organize_into_folders": "yes", "name_after_captured_application": "yes_only_games"}
         root = Path("Library")

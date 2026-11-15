@@ -2,10 +2,47 @@
 """Single recorder instance and Windows notification-area controls."""
 import ctypes
 from ctypes import wintypes
+from pathlib import Path
 import threading
 
 INSTANCE_EVENT = r"Local\LayerRecorder.Show"
 INSTANCE_MUTEX = r"Local\LayerRecorder.Instance"
+
+
+def capture_notification(action, value, previous_mode, read_settings):
+    """Describe successful capture actions using the active GSR profile's preference."""
+    messages = {
+        "record": ("record", "Recording started"),
+        "pause": ("record", "Recording paused" if value else "Recording resumed"),
+        "replay": ("replay", "Instant Replay started"),
+        "automatic_replay": ("replay", "Instant Replay started"),
+        "save": ("replay", "Instant Replay saved"),
+        "stream_start": ("streaming", "Livestream started"),
+        "stream_stop": ("streaming", "Livestream stopped"),
+        "screenshot": ("screenshot", "Screenshot saved" if value else "Screenshot copied to clipboard"),
+    }
+    if action == "stop":
+        if previous_mode == "record":
+            section, message = "record", "Recording saved"
+        elif previous_mode == "replay":
+            section, message = "replay", "Instant Replay stopped"
+        else:
+            return None
+    elif action in messages:
+        section, message = messages[action]
+    else:
+        return None
+
+    settings = read_settings(section)
+    options = settings if section == "screenshot" else settings.get("record_options")
+    if isinstance(options, dict) and options.get("show_notifications") is False:
+        return None
+    if action in {"save", "screenshot", "stop"} and isinstance(value, (str, Path)):
+        path = Path(value)
+        label = path.parent.name if path.name == "project.katman" else path.name
+        if label:
+            message = f"{message}\n{label[:105]}"
+    return message
 
 
 class RecorderInstance:
