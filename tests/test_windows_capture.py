@@ -15,11 +15,16 @@ from katman.windows_capture import (
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
 from katman.windows_audio import AudioSource, audio_encoder_command
-from katman.windows_stream import CustomDestination, Livestream, stream_video_command
+from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
 from katman.windows_screenshot import screenshot_source
 
 
 class ReplayTests(unittest.TestCase):
+    def test_gsr_frame_rate_defaults_to_60_for_missing_or_legacy_settings(self):
+        self.assertEqual(stream_frame_rate({}), 60)
+        self.assertEqual(stream_frame_rate({"record_options": {"fps": 0}}), 60)
+        self.assertEqual(stream_frame_rate({"record_options": {"fps": 144}}), 144)
+
     def test_window_screenshot_uses_window_that_preceded_overlay(self):
         with patch("katman.windows_screenshot.foreground_window", return_value=999) as foreground:
             self.assertEqual(screenshot_source({}, "screenshot_window", window_handle=321),

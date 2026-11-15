@@ -41,6 +41,11 @@ def replay_durations(settings, default_seconds=300):
     return seconds, short, max(short, duration("long_save_duration", 300))
 
 
+def gsr_frame_rate(options):
+    value = options.get("fps") if isinstance(options, dict) else None
+    return value if type(value) is int and 1 <= value <= 500 else 60
+
+
 def ac_power_connected():
     class PowerStatus(ctypes.Structure):
         _fields_ = [("ac", wintypes.BYTE), ("battery", wintypes.BYTE),

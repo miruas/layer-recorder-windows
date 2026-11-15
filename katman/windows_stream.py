@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from .windows_capture import (
-    capture_command, desktop_duplication_command, displays, dxgi_targets, scale_video,
+    capture_command, desktop_duplication_command, displays, dxgi_targets, gsr_frame_rate, scale_video,
     set_capture_cursor, set_video_color_range,
     set_video_framerate_mode, set_video_rate_control,
 )
@@ -82,9 +82,7 @@ def stream_destination(settings):
 
 
 def stream_frame_rate(settings):
-    options = settings.get("record_options")
-    rate = options.get("fps") if isinstance(options, dict) else None
-    return rate if type(rate) is int and 1 <= rate <= 500 else 30
+    return gsr_frame_rate(settings.get("record_options"))
 
 
 def stream_audio_sources(settings, inventory):

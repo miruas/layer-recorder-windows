@@ -18,7 +18,7 @@ from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, dxgi_targets, foreground_window, recording_container, video_color_range,
     ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
-    GSR_NVENC_RECORDING_CODECS, gsr_recording_encoder, gsr_ten_bit, nvenc_available, video_framerate_mode,
+    GSR_NVENC_RECORDING_CODECS, gsr_frame_rate, gsr_recording_encoder, gsr_ten_bit, nvenc_available, video_framerate_mode,
     video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
@@ -369,9 +369,10 @@ def capture_controls(library, *, background=False):
                 return
             if isinstance(record_options, dict) and "audio_track_item" in record_options:
                 configured_tracks = record_options["audio_track_item"]
-            if isinstance(record_options, dict):
-                target = record_options.get("record_area_option")
-                if target == "region" and region is None:
+            if not force_window and region is None:
+                target = (record_options.get("record_area_option", "focused_monitor")
+                          if isinstance(record_options, dict) else "focused_monitor")
+                if target == "region":
                     launch_overlay("region", region_capture=kind)
                     return
                 if isinstance(target, str) and (target == "focused_monitor" or target.startswith("\\\\.\\")):
@@ -382,9 +383,7 @@ def capture_controls(library, *, background=False):
                         status.set(str(error))
                         show()
                         return
-            configured_rate = record_options.get("fps") if isinstance(record_options, dict) else None
-            if type(configured_rate) is int and 1 <= configured_rate <= 500:
-                rate = configured_rate
+            rate = gsr_frame_rate(record_options)
             seconds, short, long = replay_durations(replay_settings)
             save_lengths = {"save_short": short, "save_long": long}
         if force_window or (use_gsr and isinstance(record_options, dict)
@@ -397,12 +396,14 @@ def capture_controls(library, *, background=False):
                 show()
                 return
         sources = [audio_options[index] for index in audio_select.curselection()]
-        follow_audio = follow_apps.get() if configured_tracks is None else False
-        if configured_tracks is not None:
+        follow_audio = follow_apps.get() and not use_gsr
+        if use_gsr:
             from .windows_audio import gsr_audio_selection
 
             try:
-                sources = gsr_audio_selection(configured_tracks, read_audio_inventory())
+                inventory = read_audio_inventory()
+                sources = (gsr_audio_selection(configured_tracks, inventory) if configured_tracks is not None
+                           else [source for source in inventory if source.default][:1])
             except (OSError, ValueError) as error:
                 status.set(str(error))
                 show()
