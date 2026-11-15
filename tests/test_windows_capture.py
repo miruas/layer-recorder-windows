@@ -239,6 +239,34 @@ def wait_fragments(test, capture, track, count=1):
 @unittest.skipUnless(capture_binary().is_file() and shutil.which("ffmpeg") and shutil.which("ffprobe"),
                      "The Rust capture engine and FFmpeg are required")
 class ProjectTests(unittest.TestCase):
+    def test_pause_trims_old_generations_before_resuming_recording(self):
+        monitor = Display("DISPLAY1", 0, 0, 96, 64, True)
+        microphone = AudioSource("mic:fixture", "Test microphone", "microphone")
+        with (tempfile.TemporaryDirectory() as directory,
+              patch("katman.windows_capture.displays", return_value=[monitor]),
+              patch("katman.windows_capture.capture_command", synthetic_video),
+              patch("katman.windows_audio.audio_sources", return_value=[microphone]),
+              patch("katman.windows_audio.capture_audio_command", synthetic_audio)):
+            capture = Capture(directory, [monitor], fps=10, audio=[microphone], record=True)
+            try:
+                for track in capture.tracks:
+                    wait_fragments(self, capture, track)
+                self.assertTrue(capture.toggle_pause())
+                video_before, audio_before = capture.tracks
+                self.assertIsInstance(video_before.paused_at, float)
+                self.assertEqual(video_before.paused_at, audio_before.paused_at)
+                time.sleep(0.5)
+                self.assertFalse(capture.toggle_pause())
+                for track in capture.active.values():
+                    wait_fragments(self, capture, track)
+                _, project = load_project(capture.finish_recording())
+                for kind in ("video", "audio"):
+                    before, after = [source for source in project["sources"] if source["type"] == kind]
+                    self.assertLessEqual(before["timeline_start"] + before["media_duration"],
+                                         after["timeline_start"] + 0.000001)
+            finally:
+                capture.stop()
+
     def test_content_mode_retains_motion_and_static_replay_heartbeat(self):
         display = Display("Fixture", 0, 0, 320, 240)
         with tempfile.TemporaryDirectory() as directory:
