@@ -19,6 +19,16 @@ from katman.windows_stream import CustomDestination, Livestream, stream_video_co
 
 
 class ReplayTests(unittest.TestCase):
+    def test_ten_bit_gsr_codecs_probe_the_requested_pixel_format(self):
+        for codec in ("hevc", "av1"):
+            with (self.subTest(codec=codec),
+                  patch("katman.windows_capture.subprocess.run") as run):
+                run.return_value.returncode = 0
+                encoder = gsr_recording_encoder({"video_codec": f"{codec}_10bit"}, "libx264", "mp4", "matroska")
+                self.assertEqual(encoder, f"{codec}_nvenc")
+                command = run.call_args.args[0]
+                self.assertEqual(command[command.index("-pix_fmt") + 1], "p010le")
+
     def test_av1_uses_nvenc_for_mp4_and_mkv(self):
         options = {"video_codec": "av1"}
         with patch("katman.windows_capture.nvenc_available", return_value=True) as available:

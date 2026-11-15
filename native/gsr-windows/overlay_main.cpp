@@ -190,6 +190,10 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
     info.supported_video_codecs.hevc = hevc && hevc[0] == '1';
     const char *av1 = std::getenv("LAYER_GSR_AV1_NVENC");
     info.supported_video_codecs.av1 = av1 && av1[0] == '1';
+    const char *hevc_10bit = std::getenv("LAYER_GSR_HEVC_10BIT_NVENC");
+    info.supported_video_codecs.hevc_10bit = hevc_10bit && hevc_10bit[0] == '1';
+    const char *av1_10bit = std::getenv("LAYER_GSR_AV1_10BIT_NVENC");
+    info.supported_video_codecs.av1_10bit = av1_10bit && av1_10bit[0] == '1';
     info.supported_containers.whip = true;
     info.system_info.supports_app_audio = true;
     info.supported_image_formats.png = true;

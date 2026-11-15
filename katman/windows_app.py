@@ -18,7 +18,8 @@ from .common import APP, ASSETS, CONFIG, SETTINGS_FILE, atomic_json
 from .windows_capture import (
     Capture, Display, capture_binary, displays, foreground_window, recording_container, video_color_range,
     ac_power_connected, gsr_h264_encoder, replay_durations, running_steam_game, video_cursor, video_rate_control,
-    GSR_NVENC_RECORDING_CODECS, gsr_recording_encoder, nvenc_available, video_framerate_mode, video_resolution, window_source,
+    GSR_NVENC_RECORDING_CODECS, gsr_recording_encoder, gsr_ten_bit, nvenc_available, video_framerate_mode,
+    video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
 from .windows_screenshot import capture_monitor, gsr_settings
@@ -426,7 +427,8 @@ def capture_controls(library, *, background=False):
                                      resolution=resolution, cursor=cursor, color_range=color_range,
                                      rate_control=rate_control, container=container, replay_directory=replay_directory,
                                      replay_container=replay_container, audio_codec=audio_codec,
-                                     framerate_mode=video_framerate_mode(record_options)))
+                                     framerate_mode=video_framerate_mode(record_options),
+                                     ten_bit=gsr_ten_bit(record_options)))
 
     def stop():
         status.set("Finishing capture…")
@@ -849,11 +851,14 @@ def capture_controls(library, *, background=False):
     apply_hotkeys()
     update_buttons()
     root.after(150, poll)
-    nvenc_recording_support = dict.fromkeys(GSR_NVENC_RECORDING_CODECS, False)
+    nvenc_recording_support = dict.fromkeys(
+        (f"{codec}{suffix}" for codec in GSR_NVENC_RECORDING_CODECS for suffix in ("", "_10bit")), False
+    )
 
     def detect_recording_codecs():
         for codec, encoder in GSR_NVENC_RECORDING_CODECS.items():
             nvenc_recording_support[codec] = nvenc_available(encoder)
+            nvenc_recording_support[f"{codec}_10bit"] = nvenc_available(encoder, ten_bit=True)
 
     threading.Thread(target=detect_recording_codecs, daemon=True).start()
 

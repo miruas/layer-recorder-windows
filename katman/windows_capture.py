@@ -153,12 +153,13 @@ def gsr_h264_encoder(options, selected):
     return "h264_nvenc" if nvenc_available("h264_nvenc") else selected
 
 
-def nvenc_available(encoder):
+def nvenc_available(encoder, *, ten_bit=False):
+    pixel_format = ["-pix_fmt", "p010le"] if ten_bit else []
     try:
         result = subprocess.run(
             ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
              "-f", "lavfi", "-i", "color=c=black:s=640x360:r=60",
-             "-frames:v", "1", "-c:v", encoder, "-preset", "p3", "-f", "null", "-"],
+             "-frames:v", "1", "-c:v", encoder, *pixel_format, "-preset", "p3", "-f", "null", "-"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -167,15 +168,22 @@ def nvenc_available(encoder):
     return result.returncode == 0
 
 
+def gsr_ten_bit(options):
+    return isinstance(options, dict) and options.get("video_codec") in ("hevc_10bit", "av1_10bit")
+
+
 def gsr_recording_encoder(options, selected, container, replay_container):
     codec = options.get("video_codec") if isinstance(options, dict) else None
+    ten_bit = gsr_ten_bit(options)
+    if ten_bit:
+        codec = codec.removesuffix("_10bit")
     if isinstance(codec, str) and codec in GSR_NVENC_RECORDING_CODECS:
         if codec == "av1" and any(value in ("mov", "flv") for value in (container, replay_container)):
             raise ValueError("Use MP4 or MKV for AV1 recording and replay.")
         if "flv" in (container, replay_container):
             raise ValueError(f"Use MP4, MKV or MOV for {codec.upper()} recording and replay.")
         encoder = GSR_NVENC_RECORDING_CODECS[codec]
-        if not nvenc_available(encoder):
+        if not (nvenc_available(encoder, ten_bit=True) if ten_bit else nvenc_available(encoder)):
             raise RuntimeError(f"{codec.upper()} NVENC could not start on this device.")
         return encoder
     return gsr_h264_encoder(options, selected)
@@ -492,7 +500,7 @@ class Capture:
                  memory_mb=512, record=False, *, audio=(), follow_displays=False,
                  follow_application_audio=False, fixed_region=None, resolution=None, cursor=None,
                  color_range=None, rate_control=None, container="mp4", replay_directory=None,
-                 replay_container=None, audio_codec="aac", framerate_mode=None):
+                 replay_container=None, audio_codec="aac", framerate_mode=None, ten_bit=False):
         if not selected:
             raise ValueError("Select at least one display.")
         if fps < 1 or seconds <= 0 or memory_mb <= 0:
@@ -505,6 +513,7 @@ class Capture:
         self.record_folder = None
         self.fps = fps
         self.encoder = encoder
+        self.ten_bit = ten_bit
         self.seconds = seconds
         self.memory_bytes = memory_mb * 1024**2
         self.container = recording_container({"container": container})
@@ -562,7 +571,7 @@ class Capture:
         self.duplication_failed.clear()
 
     def _duplication_target(self, source):
-        if (self.encoder not in NVENC_ENCODERS or self.resolution is not None or self.color_range == "pc" or
+        if (self.encoder not in NVENC_ENCODERS or self.ten_bit or self.resolution is not None or self.color_range == "pc" or
                 self.framerate_mode == "content" or source.key in self.duplication_failed or
                 source.width % 2 or source.height % 2):
             return None
@@ -588,6 +597,8 @@ class Capture:
             set_video_framerate_mode(command, self.framerate_mode, self.fps)
             if backend == "gdigrab":
                 set_video_color_range(command, self.color_range)
+                if self.ten_bit:
+                    command[command.index("-pix_fmt") + 1] = "p010le"
             stem, timescale = "display", TIMESCALE
         else:
             from .windows_audio import AUDIO_TIMESCALE, capture_audio_command
