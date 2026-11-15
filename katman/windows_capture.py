@@ -441,6 +441,16 @@ class Track:
         return "video" if isinstance(self.source, Display) else "audio"
 
 
+def replay_video_bounds(snapshots):
+    video = [(track, row) for track, row in snapshots if track.kind == "video"]
+    if not video:
+        return None
+    first = min(row["started"] + row["first"] for _, row in video)
+    ends = [(track, row["started"] + row["last"] + 1) for track, row in video]
+    live = [end for track, end in ends if not track.stopped]
+    return first, min(live) if live else max(end for _, end in ends)
+
+
 def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=()):
     sources = []
     warnings = list(warnings)
@@ -699,23 +709,10 @@ class Capture:
     def replay_status(self):
         state = self.engine.request("status")
         tracks = {track.id: track for track in self.tracks}
-        intervals = []
-        live_ends = []
-        backends = set()
-        for row in state["tracks"]:
-            track = tracks[row["id"]]
-            if track.kind != "video" or not row["count"]:
-                continue
-            start = row["started"]
-            end = start + row["last"] + 1
-            intervals.append((start + row["first"], end))
-            if not track.stopped:
-                live_ends.append(end)
-                backends.add(track.backend)
-        seconds = 0
-        if intervals:
-            end = min(live_ends) if live_ends else max(last for _, last in intervals)
-            seconds = max(0, min(self.seconds, end - min(first for first, _ in intervals)))
+        snapshots = [(tracks[row["id"]], row) for row in state["tracks"] if row["count"]]
+        bounds = replay_video_bounds(snapshots)
+        seconds = max(0, min(self.seconds, bounds[1] - bounds[0])) if bounds else 0
+        backends = {track.backend for track, _ in snapshots if track.kind == "video" and not track.stopped}
         return seconds, state["bytes"], sorted(backends)
 
     def _prune(self):
@@ -791,12 +788,11 @@ class Capture:
             raise ValueError("Replay duration must fit inside the configured buffer.")
         state = self._status()
         snapshots = [(track, state[track.id]) for track in self.tracks if state[track.id]["count"]]
-        if not snapshots:
-            raise RuntimeError("Replay is still warming up, or the memory budget is too small.")
-        bounds = [(row["started"] + row["last"] + 1, track) for track, row in snapshots]
-        live_video = [end for end, track in bounds if not track.stopped and track.kind == "video"]
-        end = min(live_video) if live_video else max(end for end, _ in bounds)
-        cutoff = max(min(row["started"] + row["first"] for _, row in snapshots), end - seconds)
+        bounds = replay_video_bounds(snapshots)
+        if bounds is None:
+            raise RuntimeError("No video is available in the replay buffer.")
+        first, end = bounds
+        cutoff = max(first, end - seconds)
         self.replay_directory.mkdir(parents=True, exist_ok=True)
         folder = Path(tempfile.mkdtemp(prefix="Layer-replay-", dir=self.replay_directory))
         try:

@@ -19,6 +19,31 @@ from katman.windows_stream import CustomDestination, Livestream, stream_video_co
 
 
 class ReplayTests(unittest.TestCase):
+    def test_replay_after_display_disconnect_ends_at_last_video_fragment(self):
+        display = Display("DISPLAY1", 0, 0, 320, 240)
+        audio = AudioSource("audio", "Test microphone", "microphone")
+        state = {"tracks": [
+            {"id": 1, "started": 0, "first": 0, "last": 4, "count": 5},
+            {"id": 2, "started": 0, "first": 0, "last": 14, "count": 15},
+        ], "bytes": 1000}
+        with (tempfile.TemporaryDirectory() as folder,
+              patch("katman.windows_capture.shutil.which", return_value="ffmpeg"),
+              patch("katman.windows_capture.CaptureEngine") as engine,
+              patch.object(Capture, "_write_project") as write):
+            request = engine.return_value.request
+            request.side_effect = lambda op, **_: {"status": state, "snapshot": 2}.get(op)
+            capture = Capture(folder, [display], audio=[audio], record=True)
+            try:
+                capture._retire(display.key)
+                self.assertEqual(capture.replay_status()[0], 5)
+                capture.save_replay(3)
+                self.assertEqual(write.call_args.args[-2:], (2, 5))
+                for call in request.call_args_list:
+                    if call.args == ("snapshot",):
+                        self.assertEqual((call.kwargs["from"], call.kwargs["to"]), (2, 5))
+            finally:
+                capture.stop()
+
     def test_region_follows_original_monitor_after_reorder_or_disconnect(self):
         original = Display("DISPLAY1", 0, 0, 1920, 1080, True, "original")
         replacement = Display("DISPLAY2", 0, 0, 1920, 1080, True, "other")
