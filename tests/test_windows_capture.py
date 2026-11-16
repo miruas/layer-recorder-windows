@@ -686,6 +686,7 @@ class ProjectTests(unittest.TestCase):
               patch("katman.windows_capture.capture_command", synthetic_video)):
             directory = Path(folder)
             capture = Capture(directory, [display], fps=10, seconds=20)
+            engine_process = capture.engine.process
             try:
                 track = capture.active[display.key]
                 wait_fragments(self, capture, track, 2)
@@ -708,6 +709,7 @@ class ProjectTests(unittest.TestCase):
                 self.assertAlmostEqual(replay["duration"], 2, places=2)
             finally:
                 capture.stop()
+            self.assertEqual(engine_process.poll(), 0)
 
     def test_webcam_composition_places_camera_in_output_frame(self):
         camera = gsr_webcam({"webcam_source": "dshow:Fixture", "webcam_x": 75, "webcam_y": 75,
@@ -733,6 +735,7 @@ class ProjectTests(unittest.TestCase):
               patch("katman.windows_audio.audio_sources", return_value=[microphone]),
               patch("katman.windows_audio.capture_audio_command", synthetic_audio)):
             capture = Capture(directory, [monitor], fps=10, audio=[microphone], record=True)
+            engine_process = capture.engine.process
             try:
                 for track in capture.tracks:
                     wait_fragments(self, capture, track)
@@ -745,6 +748,7 @@ class ProjectTests(unittest.TestCase):
                 for track in capture.active.values():
                     wait_fragments(self, capture, track)
                 _, project = load_project(capture.finish_recording())
+                self.assertEqual(engine_process.poll(), 0)
                 for kind in ("video", "audio"):
                     before, after = [source for source in project["sources"] if source["type"] == kind]
                     self.assertLessEqual(before["timeline_start"] + before["media_duration"],

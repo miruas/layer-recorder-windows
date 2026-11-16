@@ -222,6 +222,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 - A Windows test using two live WASAPI output endpoints grouped into one named GSR track produced a stereo AAC track in both a recording and a two-second replay. Mixer tests verify sample addition, clipping, and track identity when an input disconnects.
 - A live WASAPI process-loopback test played separate 640 Hz and 940 Hz tones in two Windows test programs. With the 940 Hz program excluded by name, the 640 Hz signal had over 170 times the amplitude of the 940 Hz FFT bin in the captured PCM.
 - A local fragmented MP4 stream over TCP kept the same connection, H.264 video and AAC track while synthetic application audio went from silence to a tone and back to silence.
+- The Windows recorder handled the tray exit command during a synthetic recording with the real Rust engine and FFmpeg. The recording produced readable project metadata and a playable video, and the capture engine exited cleanly. The test injected the tray command into the recorder's event queue.
 
 ### Remaining gaps and validation
 
