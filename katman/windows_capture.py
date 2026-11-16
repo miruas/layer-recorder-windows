@@ -220,6 +220,8 @@ def gsr_ten_bit(options):
 
 def gsr_recording_encoder(options, selected, container, replay_container):
     codec = options.get("video_codec") if isinstance(options, dict) else None
+    if codec in ("hevc_hdr", "av1_hdr", "hevc_hdr_vulkan", "av1_hdr_vulkan"):
+        raise ValueError("HDR capture is unavailable on Windows. Select an SDR codec in GSR.")
     ten_bit = gsr_ten_bit(options)
     if ten_bit:
         codec = codec.removesuffix("_10bit")

@@ -406,7 +406,7 @@ class ReplayTests(unittest.TestCase):
     def test_gsr_unsupported_codec_does_not_silently_encode_h264(self):
         with patch("katman.windows_capture.video_encoder_available") as available:
             with self.assertRaisesRegex(ValueError, "configured video codec is unavailable"):
-                gsr_recording_encoder({"video_codec": "hevc_hdr"}, "libx264", "mp4", "mp4")
+                gsr_recording_encoder({"video_codec": "unsupported"}, "libx264", "mp4", "mp4")
             with self.assertRaisesRegex(ValueError, "Windows livestreaming"):
                 gsr_h264_encoder({"video_codec": "av1"}, "h264_nvenc")
             available.assert_not_called()
@@ -540,6 +540,13 @@ class ReplayTests(unittest.TestCase):
                 self.assertEqual(encoder, f"{codec}_nvenc")
                 command = run.call_args.args[0]
                 self.assertEqual(command[command.index("-pix_fmt") + 1], "p010le")
+
+    def test_imported_hdr_profiles_report_the_windows_capture_limitation(self):
+        with patch("katman.windows_capture.video_encoder_available") as probe_encoder:
+            for codec in ("hevc_hdr", "av1_hdr", "hevc_hdr_vulkan", "av1_hdr_vulkan"):
+                with self.subTest(codec=codec), self.assertRaisesRegex(ValueError, "HDR capture is unavailable"):
+                    gsr_recording_encoder({"video_codec": codec}, "libx264", "mp4", "mp4")
+            probe_encoder.assert_not_called()
 
     def test_av1_uses_nvenc_for_mp4_and_mkv(self):
         options = {"video_codec": "av1"}
