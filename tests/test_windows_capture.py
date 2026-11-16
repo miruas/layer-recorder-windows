@@ -8,6 +8,7 @@ from queue import SimpleQueue
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -17,7 +18,8 @@ from unittest.mock import Mock, call, patch
 from katman.common import ASSETS, load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
-    Capture, Display, ReplayAutostart, capture_binary, capture_command, desktop_duplication_command, dxgi_targets,
+    TIMESCALE, Capture, CaptureEngine, Display, ReplayAutostart, capture_binary, capture_command,
+    desktop_duplication_command, dxgi_targets,
     graphics_capture_command, gsr_h264_encoder, replay_autostart_trigger, set_capture_cursor, video_cursor,
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
@@ -159,6 +161,7 @@ class ReplayTests(unittest.TestCase):
                 original.last_frame_seen -= 6
                 capture.reconcile([monitor])
                 self.assertTrue(original.stopped)
+                self.assertIn(call("stop", id=original.id, stalled=True), engine.return_value.request.call_args_list)
                 self.assertIn(original, capture.tracks)
                 self.assertEqual(capture.active[monitor.key].backend, "gdigrab")
             finally:
@@ -792,6 +795,28 @@ class LivestreamTests(unittest.TestCase):
 @unittest.skipUnless(capture_binary().is_file() and shutil.which("ffmpeg") and shutil.which("ffprobe"),
                      "The Rust capture engine and FFmpeg are required")
 class ProjectTests(unittest.TestCase):
+    def test_stalled_producer_stops_promptly_and_keeps_complete_fragments(self):
+        command = synthetic_video(Display("Fixture", 0, 0, 128, 128), 15, "libx264")
+        command[-1:-1] = ["-t", "2"]
+        script = "import subprocess, sys, time; subprocess.run(sys.argv[1:], check=True); time.sleep(60)"
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "captured.mp4"
+            engine = CaptureEngine(10, 16 * 1024 * 1024)
+            try:
+                engine.request("start", id=1, command=[sys.executable, "-c", script, *command],
+                               scale=TIMESCALE, media=str(path))
+                deadline = time.monotonic() + 10
+                while engine.request("status")["tracks"][0]["count"] < 2:
+                    self.assertIsNone(engine.request("failure", id=1))
+                    self.assertLess(time.monotonic(), deadline, "Capture did not produce fragments")
+                    time.sleep(.1)
+                started = time.monotonic()
+                self.assertIsNone(engine.request("stop", id=1, stalled=True))
+                self.assertLess(time.monotonic() - started, 3)
+                self.assertEqual(probe(path)["streams"][0]["codec_name"], "h264")
+                self.assertEqual(engine.request("status")["tracks"][0]["count"], 2)
+            finally:
+                engine.close()
     def test_recording_in_replay_reuses_tracks_and_keeps_the_buffer_running(self):
         display = Display("Fixture", 0, 0, 96, 64, True)
         with (tempfile.TemporaryDirectory() as folder,

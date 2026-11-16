@@ -828,10 +828,10 @@ class Capture:
             self.warnings.append(f"{source.name}: {error}")
             self.retry_at[source.key] = time.monotonic() + 5
 
-    def _retire(self, key):
+    def _retire(self, key, *, stalled=False):
         track = self.active.pop(key)
         track.stopped = True
-        error = self.engine.request("stop", id=track.id)
+        error = self.engine.request("stop", id=track.id, stalled=stalled)
         if error:
             self.warnings.append(f"{track.source.name}: {error}")
         if track.id in self.record_segments:
@@ -877,20 +877,22 @@ class Capture:
         for key, track in tuple(self.active.items()):
             source = desired.get(key)
             failure = self.engine.request("failure", id=track.id)
+            stalled = track.backend == "gfxcapture" and track.source.window != 0 and source != track.source
             if track.backend == "gfxcapture" and not failure:
                 end = gfx_status.get(track.id, {}).get("end")
                 if end is not None and end != track.last_frame_end:
                     track.last_frame_end, track.last_frame_seen = end, now
                 elif now - track.last_frame_seen >= 5:
                     failure = "No new frames arrived from Windows Graphics Capture."
+                    stalled = True
             if failure and track.backend in ("ddagrab", "gfxcapture") and source == track.source:
                 self.duplication_failed.add(key)
                 backend = "Desktop Duplication" if track.backend == "ddagrab" else "Windows Graphics Capture"
                 self.warnings.append(f"{source.name}: {backend} failed. Using GDI with NVENC.")
-                self._retire(key)
+                self._retire(key, stalled=stalled)
             elif (source != track.source or failure or
                   (track.kind == "video" and track.duplication_target != self._duplication_target(track.source))):
-                self._retire(key)
+                self._retire(key, stalled=stalled)
                 if failure and source == track.source:
                     self.retry_at[key] = now + 5
         for key, source in desired.items():

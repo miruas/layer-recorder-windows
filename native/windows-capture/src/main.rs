@@ -441,18 +441,21 @@ impl Producer {
         }))
     }
 
-    fn stop(mut self) -> Option<String> {
+    fn stop(mut self, stalled: bool) -> Option<String> {
         let already_exited = self.child.try_wait().ok().flatten().is_some();
         if let Some(mut input) = self.child.stdin.take() {
             let _ = input.write_all(b"q\n");
         }
-        let deadline = Instant::now() + Duration::from_secs(8);
+        let grace = if stalled {
+            Duration::from_millis(750)
+        } else {
+            Duration::from_secs(8)
+        };
+        let deadline = Instant::now() + grace;
         while matches!(self.child.try_wait(), Ok(None)) && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
-        if matches!(self.child.try_wait(), Ok(None)) {
-            let _ = self.child.kill();
-        }
+        let needed_kill = matches!(self.child.try_wait(), Ok(None)) && self.child.kill().is_ok();
         let status = self.child.wait();
         #[cfg(windows)]
         drop(self._job);
@@ -461,6 +464,9 @@ impl Producer {
         }
         if let Some(logger) = self.logger.take() {
             let _ = logger.join();
+        }
+        if stalled && needed_kill && status.is_ok() {
+            return None;
         }
         if already_exited || !status.is_ok_and(|status| status.success()) {
             let log = self.log.lock().unwrap().iter().copied().collect::<Vec<_>>();
@@ -598,7 +604,8 @@ fn handle(
         }
         "stop" => {
             let id = id_of(&request)?;
-            let error = children.remove(&id).and_then(Producer::stop);
+            let stalled = request["stalled"].as_bool().unwrap_or_default();
+            let error = children.remove(&id).and_then(|child| child.stop(stalled));
             let ring_error = state
                 .lock()
                 .unwrap()
@@ -698,7 +705,7 @@ fn run() -> Result<()> {
         }
     }
     for (_, child) in children {
-        child.stop();
+        child.stop(false);
     }
     Ok(())
 }
