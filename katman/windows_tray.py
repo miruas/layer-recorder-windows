@@ -79,13 +79,32 @@ class RecorderInstance:
 def create_tray(events, icon_file):
     from PIL import Image
     from pystray import Icon, Menu, MenuItem
+    from pystray._util import win32
+
+    class WindowsTray(Icon):
+        registered = False
+
+        def _message(self, code, flags, **kwargs):
+            if code == win32.NIM_ADD:
+                # The pinned pystray backend discards Shell_NotifyIcon's result.
+                data = win32.NOTIFYICONDATAW(cbSize=ctypes.sizeof(win32.NOTIFYICONDATAW),
+                                            hWnd=self._hwnd, hID=id(self), uFlags=flags, **kwargs)
+                self.registered = bool(win32.Shell_NotifyIcon(code, data))
+            else:
+                super()._message(code, flags, **kwargs)
+                if code == win32.NIM_DELETE:
+                    self.registered = False
+
+        def _on_taskbarcreated(self, wparam, lparam):
+            super()._on_taskbarcreated(wparam, lparam)
+            events.put("tray_ready")
 
     def item(label, action, default=False):
         return MenuItem(label, lambda _icon, _item: events.put(action), default=default)
 
     with Image.open(icon_file) as source:
         image = source.convert("RGBA")
-    icon = Icon("LayerRecorder", image, "Layer Recorder", Menu(
+    icon = WindowsTray("LayerRecorder", image, "Layer Recorder", Menu(
         item("Open Layer", "show", True),
         item("Open Studio", "editor"),
         item("Toggle overlay", "toggle_overlay"),
@@ -104,6 +123,7 @@ def create_tray(events, icon_file):
             tray.visible = True
         finally:
             ready.set()
+            events.put("tray_ready")
 
     icon.run_detached(setup=setup)
     return icon, ready

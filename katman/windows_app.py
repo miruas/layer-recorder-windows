@@ -218,14 +218,18 @@ def capture_controls(library, *, background=False):
     results = queue.SimpleQueue()
     tray_events = queue.SimpleQueue()
     tray = tray_ready = None
+    hide_when_tray_ready = background
     if icon_file.is_file():
         try:
             tray, tray_ready = create_tray(tray_events, icon_file)
         except (ImportError, OSError):
             pass
 
+    def tray_available():
+        return bool(tray_ready and tray_ready.is_set() and tray.registered)
+
     def notify_capture(action, value):
-        if not (tray_ready and tray_ready.is_set() and tray.visible and tray.HAS_NOTIFICATION):
+        if not (tray_available() and tray.HAS_NOTIFICATION):
             return
         if message := capture_notification(action, value, mode, gsr_settings):
             try:
@@ -234,12 +238,14 @@ def capture_controls(library, *, background=False):
                 pass
 
     def show():
+        nonlocal hide_when_tray_ready
+        hide_when_tray_ready = False
         root.deiconify()
         root.state("normal")
         root.lift()
 
     def hide():
-        if tray_ready and tray_ready.is_set() and tray.visible:
+        if tray_available():
             root.withdraw()
         else:
             close()
@@ -888,7 +894,7 @@ def capture_controls(library, *, background=False):
     def poll():
         nonlocal voice_pending
         nonlocal capture, stream, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
-        nonlocal next_power_check, stream_running
+        nonlocal next_power_check, stream_running, hide_when_tray_ready
         if instance.show_requested():
             show()
         try:
@@ -896,7 +902,13 @@ def capture_controls(library, *, background=False):
         except queue.Empty:
             pass
         else:
-            if tray_action == "show":
+            if tray_action == "tray_ready":
+                if hide_when_tray_ready and tray_available():
+                    hide_when_tray_ready = False
+                    root.withdraw()
+                elif root.state() == "withdrawn" and not tray_available():
+                    show()
+            elif tray_action == "show":
                 show()
             elif tray_action == "editor":
                 open_editor()
@@ -1043,9 +1055,6 @@ def capture_controls(library, *, background=False):
         root.after(120, poll)
 
     root.protocol("WM_DELETE_WINDOW", hide)
-    if background:
-        root.after(400, lambda: root.withdraw()
-                   if tray_ready and tray_ready.is_set() and tray.visible else None)
     refresh()
     apply_hotkeys()
     update_buttons()
