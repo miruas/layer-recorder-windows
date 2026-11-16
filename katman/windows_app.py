@@ -981,8 +981,9 @@ def capture_controls(library, *, background=False):
                 status.set(error)
                 if action in {"record", "replay", "stream_start"}:
                     show()
-                if action in {"stop", "stop_record_in_replay"}:
+                if closing and action in {"stop", "stop_record_in_replay", "stream_stop"}:
                     closing = False
+                    show()
             elif action == "pause":
                 status.set("Recording paused." if value else "Recording resumed.")
             elif action == "screenshot" and value is None:
