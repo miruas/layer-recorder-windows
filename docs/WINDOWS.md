@@ -66,7 +66,7 @@ For GSR **Auto** and **H.264**, Layer tries NVIDIA NVENC, AMD AMF and Intel Quic
 | AV1 | Working NVIDIA AV1 NVENC; MP4 or MKV |
 | HEVC or AV1 10-bit | Working matching NVIDIA 10-bit encoder; SDR capture in 10-bit 4:2:0 |
 
-Layer tries Desktop Duplication for compatible NVENC display or region capture. It uses GDI for cases including rotated displays, resizing, and explicit limited-range conversion, or when Desktop Duplication is unavailable. NVENC can still encode GDI frames. **Sync to content** uses GDI and keeps a low-rate heartbeat on static screens so replay time continues advancing. The Desktop Duplication profile caps video peak bitrate at 11 Mb/s per track.
+Layer tries Desktop Duplication for compatible NVENC display or region capture. For NVENC recording and replay, it tries Windows Graphics Capture for window targets and compatible display or region resizing. That path hands Direct3D surfaces to NVENC and switches to GDI if capture fails or stops delivering frames. Resized livestreams, explicit limited-range conversion, and webcam composition use GDI. NVENC can still encode those frames. **Sync to content** uses GDI and keeps a low-rate heartbeat on static screens so replay time continues advancing. The GPU capture profiles cap video peak bitrate at 11 Mb/s per track.
 
 GSR audio codec selection applies to recording and replay audio tracks. Add multiple inputs to a single GSR audio track to mix them into one project track. Add separate GSR tracks to keep their audio independently editable. If one track contains both a system mix and an application, Layer uses the system mix to avoid doubling the application audio. A replay made during a recording shares its encoded tracks. MOV and FLV output convert Opus audio to AAC when needed.
 
@@ -187,7 +187,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | Distribution | x64 Setup, portable ZIP, Start menu entries, tray operation, single instance, optional launch at sign-in and desktop shortcut, optional project file association, and preservation of the sign-in choice during upgrade |
 | Overlay and settings | Original Layer-patched GSR widgets and assets on Win32, live desktop dimming with snapshot fallback, settings pages, Unicode directory picker, saved monitor and audio identities, and configurable supported global shortcuts |
 | Capture and replay | Display, window and region capture, DirectShow webcam overlays, normal record/pause/resume, bounded encoded replay, independent WASAPI tracks, selected source rediscovery, monitor identity across reorders, and reconnect handling |
-| Video encoding | Software H.264 and supported NVENC H.264, HEVC and AV1; NVENC 10-bit SDR where available; explicit AMF/QSV H.264 choices; Desktop Duplication and GDI paths |
+| Video encoding | Software H.264 and supported NVENC H.264, HEVC and AV1; NVENC 10-bit SDR where available; explicit AMF/QSV H.264 choices; Desktop Duplication, Windows Graphics Capture and GDI paths |
 | Streaming and screenshots | RTMP/RTMPS, WHIP, supported custom container/protocol combinations, and monitor, window and region screenshots with disk or clipboard destinations |
 | Studio | Layer project browsing, application-named projects and subfolders, independent source tracks, playback, voiceover, and MP4 export |
 | Voice Control | Offline English recognition, selectable microphone, custom wake phrase, editable command list, dynamic replay length parsing, available history validation, repeat suppression and listener shutdown |

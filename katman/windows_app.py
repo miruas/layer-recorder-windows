@@ -921,7 +921,8 @@ def capture_controls(library, *, background=False):
                     status.set(error)
                 else:
                     count, audio_error, seconds, used, backends = value
-                    backend_names = {"ddagrab": "Desktop Duplication", "gdigrab": "GDI"}
+                    backend_names = {"ddagrab": "Desktop Duplication", "gfxcapture": "Windows Graphics Capture",
+                                     "gdigrab": "GDI"}
                     active_backends = ", ".join(backend_names[name] for name in backends)
                     if seconds:
                         replay_status.set(f"Replay available: {int(seconds)} s  ·  RAM: {used / 2**20:.0f} MiB"

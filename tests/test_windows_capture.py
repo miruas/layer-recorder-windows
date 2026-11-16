@@ -15,7 +15,7 @@ from katman.common import load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
     Capture, Display, ReplayAutostart, capture_binary, capture_command, desktop_duplication_command, dxgi_targets,
-    gsr_h264_encoder, replay_autostart_trigger,
+    graphics_capture_command, gsr_h264_encoder, replay_autostart_trigger, set_capture_cursor,
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
 from katman.windows_audio import (
@@ -30,6 +30,53 @@ from katman.windows_tray import capture_notification
 
 
 class ReplayTests(unittest.TestCase):
+    def test_wgc_crops_before_resizing_and_keeps_ten_bit_gpu_surfaces(self):
+        monitor = Display("DISPLAY2", -1920, 0, 1920, 1080)
+        region = Display("Selected region", -1820, 80, 1000, 500)
+        with patch("katman.windows_capture.monitor_handle", return_value=99):
+            command = graphics_capture_command(region, 60, monitor, (1, 2), encoder="hevc_nvenc",
+                                               resolution=(800, 400), ten_bit=True)
+        set_capture_cursor(command, False)
+        graph = command[command.index("-filter_complex") + 1]
+        self.assertIn("gfxcapture=hmonitor=99:max_framerate=60:output_fmt=x2bgr10:width=800:height=400", graph)
+        self.assertIn("crop_left=100:crop_top=80:crop_right=820:crop_bottom=500:capture_cursor=0", graph)
+        self.assertIn("d3d11va=layer:1", command)
+        self.assertNotIn("-pix_fmt", command)
+
+    def test_resized_nvenc_stream_keeps_the_continuous_gdi_path(self):
+        display = Display("DISPLAY1", 0, 0, 1920, 1080, True)
+        with (patch("katman.windows_stream.displays", return_value=[display]),
+              patch("katman.windows_stream.dxgi_targets", return_value={"display1": (0, 0)}),
+              patch("katman.windows_stream.subprocess.run") as run):
+            command = stream_video_command(display, 60, "h264_nvenc", (1280, 720), False, None, None, None)
+        run.assert_not_called()
+        self.assertIn("gdigrab", command)
+        self.assertIn("scale=1280:720,setsar=1", command)
+
+    def test_wgc_without_new_frames_falls_back_without_discarding_the_session(self):
+        monitor = Display("DISPLAY1", 0, 0, 1920, 1080, True)
+        with (tempfile.TemporaryDirectory() as directory,
+              patch("katman.windows_capture.displays", return_value=[monitor]),
+              patch("katman.windows_capture.dxgi_targets", return_value={"display1": (0, 0)}),
+              patch("katman.windows_capture.monitor_handle", return_value=1),
+              patch("katman.windows_capture.shutil.which", return_value="ffmpeg"),
+              patch("katman.windows_capture.CaptureEngine") as engine):
+            engine.return_value.request.side_effect = lambda op, **_: {"tracks": [
+                {"id": 1, "count": 1, "end": 1}
+            ]} if op == "status" else None
+            capture = Capture(directory, [monitor], encoder="h264_nvenc", resolution=(1280, 720))
+            try:
+                original = capture.active[monitor.key]
+                self.assertEqual(original.backend, "gfxcapture")
+                capture.reconcile([monitor])
+                original.last_frame_seen -= 6
+                capture.reconcile([monitor])
+                self.assertTrue(original.stopped)
+                self.assertIn(original, capture.tracks)
+                self.assertEqual(capture.active[monitor.key].backend, "gdigrab")
+            finally:
+                capture.stop()
+
     def test_capture_notifications_follow_the_respective_gsr_profiles(self):
         settings = {
             "record": {"record_options": {"show_notifications": False}},
