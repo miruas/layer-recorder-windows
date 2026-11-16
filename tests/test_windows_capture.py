@@ -3,6 +3,7 @@ import os
 import io
 import json
 from pathlib import Path
+from queue import SimpleQueue
 import shutil
 import subprocess
 import tempfile
@@ -11,7 +12,7 @@ import time
 import unittest
 from unittest.mock import Mock, call, patch
 
-from katman.common import load_project, probe
+from katman.common import ASSETS, load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
     Capture, Display, ReplayAutostart, capture_binary, capture_command, desktop_duplication_command, dxgi_targets,
@@ -26,7 +27,36 @@ from katman.windows_stream import CustomDestination, Livestream, sanitize_stream
 from katman.windows_output import CaptureOutput, capture_output, safe_component
 from katman.windows_screenshot import capture_monitor, save_image, screenshot_source, take_screenshot
 from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
-from katman.windows_tray import capture_notification
+from katman.windows_tray import capture_notification, create_tray
+
+
+@unittest.skipUnless(os.name == "nt", "Win32 notification area")
+class TrayTests(unittest.TestCase):
+    def test_tray_registration_tracks_shell_results_after_taskbar_recreation(self):
+        from pystray._util import win32
+
+        events = SimpleQueue()
+        with patch.object(win32, "Shell_NotifyIcon", return_value=False) as notify:
+            tray, ready = create_tray(events, ASSETS / "layer.ico")
+            try:
+                self.assertTrue(ready.wait(5), "Tray thread did not finish setup")
+                self.assertEqual(events.get(timeout=5), "tray_ready")
+                self.assertFalse(tray.registered)
+                self.assertEqual(notify.call_args.args[0], win32.NIM_ADD)
+
+                for accepted in (True, False, True):
+                    with self.subTest(accepted=accepted):
+                        notify.reset_mock()
+                        notify.return_value = accepted
+                        self.assertTrue(win32.PostMessage(tray._hwnd, win32.WM_TASKBARCREATED, 0, 0))
+                        self.assertEqual(events.get(timeout=5), "tray_ready")
+                        self.assertEqual(tray.registered, accepted)
+                        self.assertEqual(notify.call_args.args[0], win32.NIM_ADD)
+            finally:
+                tray.stop()
+                tray._thread.join(timeout=5)
+            self.assertFalse(tray._thread.is_alive())
+            self.assertFalse(tray.registered)
 
 
 class ReplayTests(unittest.TestCase):
