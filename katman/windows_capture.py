@@ -544,7 +544,32 @@ def replay_video_bounds(snapshots):
     return first, min(live) if live else max(end for _, end in ends)
 
 
-def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=(), *, output=None):
+def latest_coverage_start(spans, end):
+    boundary = end
+    for start, stop in sorted(spans, key=lambda span: span[1], reverse=True):
+        if stop + .001 < boundary:
+            break
+        boundary = min(boundary, start)
+    return boundary
+
+
+def continuous_replay_start(snapshots, first, end):
+    spans = []
+    for track, row in snapshots:
+        if track.kind != "video":
+            continue
+        origin = row["started"]
+        limit = min(end, track.paused_at) if track.paused_at is not None else end
+        ranges = row["coverage"] if "coverage" in row else [(row["first"], row.get("end", row["last"] + 1))]
+        for start, stop in ranges:
+            start, stop = max(first, origin + start), min(limit, origin + stop)
+            if start < stop:
+                spans.append((start, stop))
+    return latest_coverage_start(spans, end)
+
+
+def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=(), *, output=None,
+                 require_full_duration=False):
     sources = []
     warnings = list(warnings)
     for track, media, start in tracks:
@@ -577,6 +602,11 @@ def project_data(folder, kind, tracks, cutoff=None, end=None, warnings=(), *, ou
         end = max(s["timeline_start"] + s["media_duration"] for s in sources)
     if cutoff is None:
         cutoff = min(s["timeline_start"] for s in sources)
+    if require_full_duration:
+        video = [(s["timeline_start"], s["timeline_start"] + s["media_duration"])
+                 for s in sources if s["type"] == "video" and s["timeline_start"] < end]
+        if latest_coverage_start(video, end) > cutoff + .001:
+            raise RuntimeError("Replay history changed while saving. Try a shorter duration.")
     sources = [s for s in sources if s["timeline_start"] < end and
                s["timeline_start"] + s["media_duration"] > cutoff]
     for source in sources:
@@ -859,8 +889,9 @@ class Capture:
         self._prune()
         return sum(track.kind == "video" for track in self.active.values())
 
-    def _status(self):
-        return {row["id"]: row for row in self.engine.request("status")["tracks"]}
+    def _status(self, *, coverage=False):
+        state = self.engine.request("status", coverage=True) if coverage else self.engine.request("status")
+        return {row["id"]: row for row in state["tracks"]}
 
     def replay_status(self):
         state = self.engine.request("status")
@@ -1031,14 +1062,18 @@ class Capture:
     def save_replay(self, seconds, *, require_full_duration=False, output=None):
         if not 0 < seconds <= self.seconds:
             raise ValueError("Replay duration must fit inside the configured buffer.")
-        state = self._status()
+        state = self._status(coverage=require_full_duration)
         snapshots = [(track, state[track.id]) for track in self.tracks if state[track.id]["count"]]
         bounds = replay_video_bounds(snapshots)
         if bounds is None:
             raise RuntimeError("No video is available in the replay buffer.")
         first, end = bounds
-        if require_full_duration and end - first < seconds:
-            raise ValueError(f"Requested {seconds:g} s, but only {int(end - first)} s of replay is available.")
+        if require_full_duration:
+            first = continuous_replay_start(snapshots, first, end)
+            available = end - first
+            if seconds - available > .000001:
+                raise ValueError(f"Requested {seconds:g} s, but only {int(available + .000001)} s "
+                                 "of continuous replay is available.")
         cutoff = max(first, end - seconds)
         directory = output.directory if output else self.replay_directory
         prefix = output.prefix if output else "Layer-replay-"
@@ -1055,13 +1090,15 @@ class Capture:
                 if first is not None:
                     tracks.append((track, media, start + first))
             path = folder / "project.katman"
-            self._write_project(path, "replay", tracks, cutoff, end, output=output)
+            self._write_project(path, "replay", tracks, cutoff, end, output=output,
+                                require_full_duration=require_full_duration)
             return path
         except Exception:
             shutil.rmtree(folder)
             raise
 
-    def _write_project(self, path, kind, tracks, cutoff=None, end=None, *, output=None):
+    def _write_project(self, path, kind, tracks, cutoff=None, end=None, *, output=None,
+                       require_full_duration=False):
         container = self.replay_container if kind == "replay" else self.container
         extension = RECORDING_CONTAINERS[container]
         converted = []
@@ -1089,7 +1126,8 @@ class Capture:
                 converted.append((track, media, start))
             finally:
                 pending.unlink(missing_ok=True)
-        project = project_data(path.parent, kind, converted, cutoff, end, warnings, output=output)
+        project = project_data(path.parent, kind, converted, cutoff, end, warnings, output=output,
+                               require_full_duration=require_full_duration)
         atomic_json(path, project)
         used = {source["file"] for source in project["sources"]}
         for original, output in cleanup:

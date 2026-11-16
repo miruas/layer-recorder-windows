@@ -9,7 +9,7 @@ from katman.voice_control import (
     CommandMatcher, VoiceCommand, VoiceConfig, VoiceMatch, duration_seconds, load_config, save_config,
     validate_config, words,
 )
-from katman.windows_capture import Capture
+from katman.windows_capture import Capture, Display, Track
 from katman.windows_voice import SpeechGate, VoiceListener
 
 
@@ -71,20 +71,27 @@ class VoiceCommandTests(unittest.TestCase):
     def test_strict_replay_validates_same_snapshot_and_preserves_existing_behavior(self):
         capture = Capture.__new__(Capture)
         capture.seconds = 180
-        capture._status = Mock(return_value={})
-        capture.tracks = []
+        capture.tracks = [Track(1, Display("Fixture", 0, 0, 640, 480), 30, None)]
+        capture.engine = Mock()
+        capture.engine.request.return_value = 15
+        snapshot = {"count": 2, "started": 0, "first": 15, "last": 149, "end": 150,
+                    "coverage": [[15, 40], [100, 150]]}
+        capture._status = Mock(return_value={1: snapshot})
         with tempfile.TemporaryDirectory() as folder:
             capture.replay_directory = Path(folder)
-            with patch("katman.windows_capture.replay_video_bounds", return_value=(15, 150)), \
-                    patch.object(capture, "_write_project") as write:
+            with patch.object(capture, "_write_project") as write:
                 with self.assertRaisesRegex(ValueError, "configured buffer"):
                     capture.save_replay(181, require_full_duration=True)
-                with self.assertRaisesRegex(ValueError, "only 135 s"):
-                    capture.save_replay(136, require_full_duration=True)
+                with self.assertRaisesRegex(ValueError, "only 50 s of continuous replay"):
+                    capture.save_replay(51, require_full_duration=True)
+                capture._status.assert_called_with(coverage=True)
                 self.assertEqual(list(Path(folder).iterdir()), [])
-                capture.save_replay(135, require_full_duration=True)
-                self.assertEqual(write.call_args.args[-2:], (15, 150))
+                capture.engine.request.return_value = 100
+                capture.save_replay(50, require_full_duration=True)
+                self.assertEqual(write.call_args.args[-2:], (100, 150))
+                capture.engine.request.return_value = 15
                 capture.save_replay(180)
+                capture._status.assert_called_with(coverage=False)
                 self.assertEqual(write.call_args.args[-2:], (15, 150))
 
 

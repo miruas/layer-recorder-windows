@@ -158,6 +158,20 @@ struct Ring {
     recording: Option<Arc<Mutex<LiveRecording>>>,
 }
 
+impl Ring {
+    fn coverage(&self) -> Vec<[f64; 2]> {
+        let mut ranges: Vec<[f64; 2]> = Vec::new();
+        for fragment in &self.fragments {
+            if let Some(last) = ranges.last_mut().filter(|last| fragment.start <= last[1] + 0.001) {
+                last[1] = last[1].max(fragment.end);
+            } else {
+                ranges.push([fragment.start, fragment.end]);
+            }
+        }
+        ranges
+    }
+}
+
 struct LiveRecording {
     output: Option<BufWriter<File>>,
     from: f64,
@@ -549,12 +563,17 @@ fn handle(
         "status" => {
             let mut state = state.lock().unwrap();
             state.trim();
+            let coverage = request["coverage"].as_bool().unwrap_or_default();
             Ok(
                 json!({"bytes": state.bytes, "tracks": state.rings.iter().map(|(id, ring)| {
-                json!({"id": id, "started": ring.started, "count": ring.fragments.len(),
+                let mut status = json!({"id": id, "started": ring.started, "count": ring.fragments.len(),
                     "first": ring.fragments.front().map(|f| f.start),
                     "last": ring.fragments.back().map(|f| f.start),
-                    "end": ring.fragments.back().map(|f| f.end), "error": ring.error})
+                    "end": ring.fragments.back().map(|f| f.end), "error": ring.error});
+                if coverage {
+                    status["coverage"] = json!(ring.coverage());
+                }
+                status
             }).collect::<Vec<_>>() }),
             )
         }
@@ -753,6 +772,15 @@ mod tests {
             start: time as f64,
             end: time as f64 + 1.0,
         }
+    }
+
+    #[test]
+    fn coverage_keeps_gaps_between_retained_fragments() {
+        let ring = Ring {
+            fragments: [0, 1, 8, 9].map(|start| Arc::new(fragment(start))).into(),
+            ..Ring::default()
+        };
+        assert_eq!(ring.coverage(), vec![[0.0, 2.0], [8.0, 10.0]]);
     }
 
     #[test]
