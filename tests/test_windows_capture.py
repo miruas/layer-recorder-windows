@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
+from concurrent.futures import ThreadPoolExecutor
 import os
 import io
 import json
 from pathlib import Path
 from queue import SimpleQueue
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -718,6 +720,44 @@ def wait_fragments(test, capture, track, count=1):
             test.fail(error)
         test.assertLess(time.monotonic(), deadline, "Capture did not produce fragments")
         time.sleep(.1)
+
+
+@unittest.skipUnless(os.name == "nt" and shutil.which("ffmpeg") and shutil.which("ffprobe"),
+                     "Windows and FFmpeg are required")
+class LivestreamTests(unittest.TestCase):
+    def test_small_region_stream_sends_video_and_audio_and_closes_publisher(self):
+        with (tempfile.TemporaryDirectory() as folder, socket.socket() as receiver,
+              ThreadPoolExecutor(max_workers=1) as workers,
+              patch("katman.windows_stream.capture_command", synthetic_video)):
+            path = Path(folder) / "stream.mp4"
+            receiver.bind(("127.0.0.1", 0))
+            receiver.listen(1)
+            receiver.settimeout(10)
+
+            def receive():
+                connection, _ = receiver.accept()
+                with connection, connection.makefile("rb") as incoming, path.open("wb") as output:
+                    connection.settimeout(12)
+                    shutil.copyfileobj(incoming, output)
+
+            received = workers.submit(receive)
+            destination = CustomDestination(f"tcp://127.0.0.1:{receiver.getsockname()[1]}", "mp4")
+            live = Livestream(Display("Selected region", 0, 0, 128, 128), 15, "libx264",
+                              destination, discover_audio=list)
+            try:
+                self.assertTrue(live.started.wait(8), live.failure_message())
+                time.sleep(1.2)
+            finally:
+                live.stop()
+            received.result(timeout=12)
+            self.assertEqual(live.poll(), 0, live.failure_message())
+            self.assertFalse(live.audio_thread.is_alive())
+            streams = {stream["codec_type"]: stream for stream in probe(path)["streams"]}
+            self.assertEqual((streams["video"]["width"], streams["video"]["height"]), (128, 128))
+            self.assertEqual(streams["video"]["codec_name"], "h264")
+            self.assertEqual(streams["audio"]["codec_name"], "aac")
+            subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", str(path), "-f", "null", "-"],
+                           check=True, timeout=10)
 
 
 @unittest.skipUnless(capture_binary().is_file() and shutil.which("ffmpeg") and shutil.which("ffprobe"),
