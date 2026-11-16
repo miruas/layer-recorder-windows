@@ -47,7 +47,7 @@ Exit Layer before replacing preferences from a backup. Copy complete project fol
 
 ### Choose the capture profile
 
-- **GSR overlay and GSR recording shortcuts.** Open **Alt+Z → Record → Settings** or **Instant Replay → Settings**. Choose a display, a window, or **Region**, plus the frame rate, audio inputs, output location, and supported video and audio options. Start the action from its card. Region capture opens a drag selector. For window capture, focus the target window before opening the overlay. **Shift+F9** starts or stops foreground-window recording directly.
+- **GSR overlay and GSR recording shortcuts.** Open **Alt+Z → Record → Settings** or **Instant Replay → Settings**. Choose a display, **Window**, or **Region**, plus the frame rate, audio inputs, output location, and supported video and audio options. Start the action from its card. In **Window** mode, move the pointer over the window to highlight it, then click. Open the picker on the target monitor. In **Region** mode, drag a rectangle. Press **Escape** to cancel either picker. **Shift+F9** starts or stops foreground-window recording directly.
 - **Windows recorder controls and tray.** Select displays, FPS, encoder and audio sources in the main recorder window. Use **Start recording** or **Start replay**. The tray and the recorder's **Ctrl+Alt** start/stop shortcuts use this profile. Enable **Include newly connected displays** or **Include newly active applications** before starting when you want to follow those sources.
 
 For game audio, choose the system mix or individual applications. Selecting both can duplicate playback. Per-application audio uses WASAPI process loopback and requires Windows build 20348 or later. If an application is missing, start its audio playback and use **Refresh audio**. A selected capture microphone is a recording track. Set the Voice Control microphone separately.
@@ -135,7 +135,7 @@ For `clip {duration} of that`, say “Kivo, clip one minute and ten seconds of t
 
 ### Livestream
 
-1. Open **Alt+Z → Livestream → Settings**. Choose a capture source, supported H.264 encoder, frame rate, audio inputs and destination.
+1. Open **Alt+Z → Livestream → Settings**. Choose a capture source, supported H.264 encoder, frame rate, audio inputs and destination. **Window** opens the same click-to-select picker when you start the stream.
 2. Set the service's RTMP or RTMPS URL and key where applicable. A WHIP receiver needs its HTTP or HTTPS endpoint and may need a bearer token. Keep keys and tokens private.
 3. Start or stop from the card or with **Alt+F8**. RTMP/RTMPS output mixes selected WASAPI inputs into AAC. WHIP publishes H.264 with Opus. The custom container must match the publishing URL:
 
@@ -148,7 +148,7 @@ For `clip {duration} of that`, say “Kivo, clip one minute and ten seconds of t
 
 ### Screenshots
 
-Open the overlay's screenshot settings to select the target, PNG or JPEG, save directory, optional resize, and disk or clipboard output. At least one destination must be enabled. **Record cursor** applies to monitor, window and region screenshots. Application folder and naming settings apply to disk output. **Print Screen** captures the configured target. **Shift+Print Screen** captures the foreground window. **Ctrl+Print Screen** opens a region selector on the cursor monitor. Drag to select or press **Escape** to cancel.
+Open the overlay's screenshot settings to select the target, PNG or JPEG, save directory, optional resize, and disk or clipboard output. At least one destination must be enabled. **Record cursor** applies to monitor, window and region screenshots. Application folder and naming settings apply to disk output. **Print Screen** captures the configured target and opens the corresponding picker for **Window** or **Region**. **Shift+Print Screen** captures the foreground window. **Ctrl+Print Screen** opens a region selector on the cursor monitor. Press **Escape** to cancel either picker.
 
 ## Edit and export
 

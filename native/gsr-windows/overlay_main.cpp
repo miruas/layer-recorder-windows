@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include <windows.h>
 #include <commctrl.h>
+#include <dwmapi.h>
 #include <GL/gl.h>
 #include <algorithm>
 #include <chrono>
@@ -175,11 +176,90 @@ void select_region(mgl::Window &window, const RECT &bounds, mgl::Texture &backdr
     }
 }
 
+struct WindowSelection {
+    HWND overlay;
+    POINT point;
+    HWND target = nullptr;
+    RECT bounds{};
+};
+
+WindowSelection window_at(HWND overlay, POINT point) {
+    WindowSelection selected{overlay, point};
+    EnumWindows([](HWND hwnd, LPARAM data) -> BOOL {
+        auto &selection = *reinterpret_cast<WindowSelection *>(data);
+        if (hwnd == selection.overlay || hwnd == GetShellWindow() || hwnd == GetDesktopWindow() ||
+            !IsWindowVisible(hwnd) || IsIconic(hwnd) ||
+            (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)))
+            return TRUE;
+        DWORD cloaked = 0;
+        if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
+            return TRUE;
+        RECT client{};
+        if (!GetClientRect(hwnd, &client) || client.right < 2 || client.bottom < 2)
+            return TRUE;
+        RECT frame{};
+        if (FAILED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame))) &&
+            !GetWindowRect(hwnd, &frame))
+            return TRUE;
+        if (!PtInRect(&frame, selection.point))
+            return TRUE;
+        selection.target = hwnd;
+        selection.bounds = frame;
+        return FALSE;
+    }, reinterpret_cast<LPARAM>(&selected));
+    return selected;
+}
+
+void select_window(mgl::Window &window, const RECT &bounds, mgl::Texture &backdrop) {
+    const auto hwnd = reinterpret_cast<HWND>(window.get_system_handle());
+    mgl::Sprite desktop(&backdrop);
+    const auto draw = [&](const WindowSelection &selection) {
+        window.clear();
+        window.draw(desktop);
+        mgl::Rectangle shade(window.get_size().to_vec2f());
+        shade.set_color({0, 0, 0, 100});
+        window.draw(shade);
+        RECT visible{};
+        if (selection.target && IntersectRect(&visible, &selection.bounds, &bounds)) {
+            mgl::Rectangle highlight({float(visible.left - bounds.left), float(visible.top - bounds.top)},
+                                     {float(visible.right - visible.left), float(visible.bottom - visible.top)});
+            highlight.set_color({255, 255, 255, 80});
+            window.draw(highlight);
+        }
+        window.display();
+    };
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    draw(window_at(hwnd, cursor));
+    window.set_visible(true);
+    while (window.is_open()) {
+        mgl::Event event;
+        while (window.poll_event(event)) {
+            if (event.type == mgl::Event::Closed || event.type == mgl::Event::LostFocus ||
+                (event.type == mgl::Event::KeyPressed && event.key.code == mgl::Keyboard::Escape))
+                return;
+            if (event.type == mgl::Event::MouseMoved)
+                draw(window_at(hwnd, {bounds.left + event.mouse_move.x, bounds.top + event.mouse_move.y}));
+            if (event.type == mgl::Event::MouseButtonPressed && event.mouse_button.button == mgl::Mouse::Left) {
+                const auto selected = window_at(hwnd, {bounds.left + event.mouse_button.x,
+                                                       bounds.top + event.mouse_button.y});
+                if (selected.target) {
+                    window.set_visible(false);
+                    std::printf("window %llu\n", static_cast<unsigned long long>(
+                        reinterpret_cast<ULONG_PTR>(selected.target)));
+                    return;
+                }
+            }
+        }
+        if (window.is_open()) MsgWaitForMultipleObjectsEx(0, nullptr, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    }
+}
+
 int show_overlay(const std::string &resources, std::wstring_view mode) {
     mgl::Window window;
     mgl::Window::CreateParams params;
     params.hidden = true;
-    params.support_alpha = mode != L"region";
+    params.support_alpha = mode != L"region" && mode != L"window";
     params.size = {0, 0};
     params.window_type = MGL_WINDOW_TYPE_OVERLAY;
     if (!window.create("GPU Screen Recorder", params)) return 2;
@@ -199,6 +279,10 @@ int show_overlay(const std::string &resources, std::wstring_view mode) {
     if (!live && !capture_backdrop(bounds, backdrop)) return 4;
     if (mode == L"region") {
         select_region(window, bounds, backdrop);
+        return 0;
+    }
+    if (mode == L"window") {
+        select_window(window, bounds, backdrop);
         return 0;
     }
     if (!gsr::init_theme(resources)) return 5;

@@ -3,6 +3,7 @@ param(
     [string]$OverlayDirectory = '',
     [switch]$SelectRecordings,
     [switch]$SelectRegion,
+    [switch]$SelectWindow,
     [switch]$CloseSettings,
     [switch]$LiveCaptureState,
     [switch]$SoftwareOpenGL
@@ -26,6 +27,14 @@ public static class GsrOverlayTest {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern IntPtr CreateWindowEx(
+        uint exStyle, string className, string title, uint style, int x, int y, int width, int height,
+        IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
+    [DllImport("user32.dll")] public static extern bool DestroyWindow(IntPtr window);
+    public static IntPtr CreateFixture(int x, int y) {
+        return CreateWindowEx(8, "STATIC", "Layer window selection fixture", 0x10CF0000,
+            x, y, 320, 240, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+    }
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern uint RegisterWindowMessage(string name);
     [DllImport("user32.dll")] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message,
         IntPtr wparam, IntPtr lparam, uint flags, uint timeout, out IntPtr result);
@@ -65,6 +74,7 @@ if ($OverlayDirectory) {
 $launch = [System.Diagnostics.ProcessStartInfo]::new($exe)
 $launch.ArgumentList.Add($source)
 if ($SelectRegion) { $launch.ArgumentList.Add('region') }
+if ($SelectWindow) { $launch.ArgumentList.Add('window') }
 $launch.UseShellExecute = $false
 $launch.RedirectStandardOutput = $true
 if ($LiveCaptureState) { $launch.Environment['LAYER_GSR_STATE_MESSAGES'] = '1' }
@@ -75,8 +85,13 @@ if ($CloseSettings) {
     $launch.Environment['LAYER_GSR_CONFIG'] = $configFile
 }
 $process = $null
+$fixture = [IntPtr]::Zero
 $softwareDll = Join-Path (Split-Path -Parent $exe) 'opengl32.dll'
 try {
+    if ($SelectWindow) {
+        $fixture = [GsrOverlayTest]::CreateFixture($info.Bounds.Left + 40, $info.Bounds.Top + 40)
+        if ($fixture -eq [IntPtr]::Zero) { throw 'Could not open the window selection fixture.' }
+    }
     if ($SoftwareOpenGL) {
         Copy-Item -LiteralPath (Join-Path $Toolchain 'opengl32.dll') -Destination $softwareDll
         $launch.Environment['Path'] = "$Toolchain;$env:Path"
@@ -126,6 +141,12 @@ try {
             ![GsrOverlayTest]::PostMessage($window, 0x10, [IntPtr]0, [IntPtr]0)) {
             throw 'Could not open and close the GSR settings.'
         }
+    } elseif ($SelectWindow) {
+        $point = [IntPtr]((140 -shl 16) -bor 140)
+        if (![GsrOverlayTest]::PostMessage($window, 0x200, [IntPtr]0, $point) -or
+            ![GsrOverlayTest]::PostMessage($window, 0x201, [IntPtr]1, $point)) {
+            throw 'Could not select the fixture window.'
+        }
     } elseif ($SelectRegion) {
         $start = [IntPtr]((250 -shl 16) -bor 300)
         $end = [IntPtr]((70 -shl 16) -bor 100)
@@ -161,6 +182,10 @@ try {
         $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
         if (!$config.main -or $action -ne 'resume_hotkeys') { throw 'Closing settings did not save the GSR configuration.' }
         Write-Host 'The overlay saved its settings before closing.'
+    } elseif ($SelectWindow) {
+        $expected = "window $($fixture.ToInt64())"
+        if ($action -ne $expected) { throw "Expected '$expected', received '$action'." }
+        Write-Host 'The native overlay returned the selected window.'
     } elseif ($SelectRegion) {
         $expected = "region $($bounds.Left + 100) $($bounds.Top + 70) 200 180"
         if ($action -ne $expected) { throw "Expected '$expected', received '$action'." }
@@ -180,6 +205,7 @@ try {
         }
         $process.Dispose()
     }
+    if ($fixture -ne [IntPtr]::Zero) { [void][GsrOverlayTest]::DestroyWindow($fixture) }
     if ($SoftwareOpenGL -and (Test-Path -LiteralPath $softwareDll)) {
         Remove-Item -LiteralPath $softwareDll
     }

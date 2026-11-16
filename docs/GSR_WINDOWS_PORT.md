@@ -93,8 +93,9 @@ Replay profiles resize on Direct3D surfaces using Windows Graphics Capture.
 Resized livestreams use GDI with the selected encoder.
 When Region is selected, Record and Replay open the same drag selector and
 capture only the selected rectangle.
-Window capture targets the foreground window when the overlay opens.
-Shift+F9 starts or stops recording the foreground window directly.
+The window picker highlights the visible top-level window under the pointer.
+Click to select it for capture or press Escape to cancel. Shift+F9 starts or
+stops recording the foreground window directly.
 With global shortcuts enabled, Alt+F9 toggles recording, Ctrl+F9 selects
 a recording region, and Shift+Alt+F10 toggles Instant Replay. Alt+F10,
 Alt+F11 and Alt+F12 save the full, short and long replay, respectively.

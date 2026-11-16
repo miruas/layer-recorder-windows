@@ -94,7 +94,7 @@ foreach ($file in $cSources + $cppSources) {
     $objects += $object
 }
 $exe = Join-Path $build 'gsr-widget-win32-smoke.exe'
-$windowsLibs = @('-lopengl32', '-lgdi32', '-luser32', '-lshell32', '-lole32', '-luuid', '-lcomctl32')
+$windowsLibs = @('-lopengl32', '-lgdi32', '-luser32', '-lshell32', '-lole32', '-luuid', '-lcomctl32', '-ldwmapi')
 $testConfig = Join-Path $build 'widget-config-test.o'
 & $cxx -std=c++17 -O2 -DLAYER_GSR_CONFIG_LIBRARY -DLAYER_GSR_CONFIG_TEST @includes -c "$port/config.cpp" -o $testConfig
 if ($LASTEXITCODE -ne 0) { throw 'Could not compile the isolated GSR test configuration.' }

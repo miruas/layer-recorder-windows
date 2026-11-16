@@ -205,7 +205,7 @@ def capture_controls(library, *, background=False):
     pending_screenshot = None
     overlay_hotkeys_suspended = False
     overlay_dismissed = False
-    overlay_region_capture = None
+    overlay_selection_capture = None
     overlay_window = None
     hotkeys = None
     next_inventory = 0.0
@@ -440,21 +440,22 @@ def capture_controls(library, *, background=False):
                 target = (record_options.get("record_area_option", "focused_monitor")
                           if isinstance(record_options, dict) else "focused_monitor")
                 if target == "region":
-                    launch_overlay("region", region_capture=kind)
+                    launch_overlay("region", selection_capture=kind)
                     return
-                if target != "window":
-                    try:
-                        selected = [capture_monitor(target)]
-                        chosen_monitor = True
-                    except (OSError, RuntimeError) as error:
-                        status.set(str(error))
-                        show()
-                        return
+                if target == "window":
+                    launch_overlay("window", selection_capture=kind)
+                    return
+                try:
+                    selected = [capture_monitor(target)]
+                    chosen_monitor = True
+                except (OSError, RuntimeError) as error:
+                    status.set(str(error))
+                    show()
+                    return
             rate = gsr_frame_rate(record_options)
             seconds, short, long = replay_durations(replay_settings)
             save_lengths = {"save_short": short, "save_long": long}
-        if force_window or (use_gsr and isinstance(record_options, dict)
-                            and record_options.get("record_area_option") == "window"):
+        if force_window:
             try:
                 selected = [window_source(window_handle if window_handle is not None else foreground_window())]
                 chosen_monitor = True
@@ -553,7 +554,7 @@ def capture_controls(library, *, background=False):
         elif command.action == "stop_recording" and mode == "record":
             stop()
 
-    def toggle_stream(*, window_handle=None):
+    def toggle_stream(*, selected_window=None):
         if stream is not None:
             submit("stream_stop", stream.stop)
             return
@@ -564,11 +565,13 @@ def capture_controls(library, *, background=False):
             destination = stream_destination(settings)
             options = settings.get("record_options") or {}
             target = options.get("record_area_option", "focused_monitor")
-            if target == "region":
-                launch_overlay("region", region_capture="stream")
+            if selected_window is not None:
+                source = window_source(selected_window)
+            elif target in ("region", "window"):
+                launch_overlay(target, selection_capture="stream")
                 return
-            source = (window_source(foreground_window() if window_handle is None else window_handle)
-                      if target == "window" else capture_monitor(target))
+            else:
+                source = capture_monitor(target)
             launch_stream(source, stream_frame_rate(settings), destination, settings)
         except (OSError, RuntimeError, ValueError, AttributeError) as error:
             status.set(str(error))
@@ -620,8 +623,8 @@ def capture_controls(library, *, background=False):
             state = "paused" if capture and capture.paused else mode or "idle"
             launch_overlay(state + ("+stream" if stream is not None else ""))
 
-    def launch_overlay(overlay_mode, *, region_capture=None):
-        nonlocal overlay, overlay_dismissed, overlay_region_capture, overlay_window
+    def launch_overlay(overlay_mode, *, selection_capture=None):
+        nonlocal overlay, overlay_dismissed, overlay_selection_capture, overlay_window
         nonlocal overlay_messages, overlay_action
         nonlocal overlay_handle, overlay_state_sent
         if overlay is not None:
@@ -630,7 +633,7 @@ def capture_controls(library, *, background=False):
         resources = APP / "overlay/resources"
         try:
             overlay_dismissed = False
-            overlay_region_capture = region_capture
+            overlay_selection_capture = selection_capture
             overlay_window = foreground_window()
             overlay_handle = overlay_state_sent = None
             from .windows_audio import gsr_audio_inventory
@@ -709,8 +712,18 @@ def capture_controls(library, *, background=False):
         elif action == b"exit":
             close()
         elif action.startswith(b"region "):
-            window_handle, region_capture = overlay_window, overlay_region_capture
+            window_handle, region_capture = overlay_window, overlay_selection_capture
             queue_action(lambda: finish_overlay_region(action, region_capture, window_handle))
+        elif action.startswith(b"window "):
+            handle = action.removeprefix(b"window ")
+            if handle.isdigit() and 0 < len(handle) <= 20 and int(handle):
+                target, window_capture = int(handle), overlay_selection_capture
+                if window_capture == "stream":
+                    queue_action(lambda: toggle_stream(selected_window=target))
+                elif window_capture in ("record", "replay"):
+                    queue_action(lambda: start(window_capture, use_gsr=True, window_handle=target, force_window=True))
+                else:
+                    queue_action(lambda: start_screenshot("screenshot_window", target))
         elif action in {b"toggle_record", b"toggle_replay", b"toggle_pause", b"save_replay", b"save_short", b"save_long",
                        b"toggle_stream"}:
             dispatch_hotkey(action.decode("ascii"), from_overlay=True, window_handle=overlay_window)
@@ -752,10 +765,11 @@ def capture_controls(library, *, background=False):
         try:
             settings = screenshot_settings()
             window_handle = foreground_window() if window_handle is None else window_handle
-            if action == "screenshot_region" or (
-                action == "screenshot" and settings.get("record_area_option") == "region"
-            ):
-                launch_overlay("region")
+            target = settings.get("record_area_option")
+            if action == "screenshot_region":
+                target = "region"
+            if action != "screenshot_window" and target in ("region", "window"):
+                launch_overlay(target)
                 return
             source = screenshot_source(settings, action, window_handle=window_handle)
             clipboard_owner = root.winfo_id()
@@ -782,7 +796,7 @@ def capture_controls(library, *, background=False):
         if action == "toggle_overlay":
             toggle_overlay()
         elif action == "toggle_stream":
-            toggle_stream(window_handle=window_handle)
+            toggle_stream()
         elif action == "toggle_pause":
             if capture is not None and mode == "record":
                 submit("pause", capture.toggle_pause)
@@ -799,7 +813,7 @@ def capture_controls(library, *, background=False):
             if capture is None:
                 if action == "toggle_region_record":
                     if overlay is None:
-                        launch_overlay("region", region_capture="record")
+                        launch_overlay("region", selection_capture="record")
                 else:
                     start("record", use_gsr=from_overlay or action != "toggle_record",
                           window_handle=window_handle,
