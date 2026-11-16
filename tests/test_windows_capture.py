@@ -60,6 +60,28 @@ class TrayTests(unittest.TestCase):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_focused_monitor_uses_physical_cursor_and_primary_fallback(self):
+        secondary = Display("DISPLAY2", -1600, 0, 1600, 900)
+        primary = Display("DISPLAY1", 0, 0, 1920, 1080, True)
+        user32 = Mock()
+        user32.SetThreadDpiAwarenessContext.return_value = 123
+
+        def get_cursor_position(point):
+            point._obj.x, point._obj.y = position
+            return True
+
+        user32.GetCursorPos.side_effect = get_cursor_position
+        with (patch("katman.windows_screenshot.displays", return_value=[secondary, primary]),
+              patch("katman.windows_screenshot.ctypes.WinDLL", return_value=user32, create=True)):
+            position = (-800, 200)
+            self.assertEqual(capture_monitor("focused_monitor"), secondary)
+            position = (-800, 950)
+            self.assertEqual(capture_monitor("focused_monitor"), primary)
+            self.assertEqual(user32.SetThreadDpiAwarenessContext.call_args.args, (123,))
+            for source in ("HDMI-A-1", "portal", ""):
+                with self.subTest(source=source), self.assertRaisesRegex(RuntimeError, "supported capture target"):
+                    capture_monitor(source)
+
     def test_window_screenshot_honors_the_gsr_cursor_setting(self):
         with (patch.object(subprocess, "CREATE_NO_WINDOW", 0, create=True),
               patch("katman.windows_screenshot.subprocess.run") as run,

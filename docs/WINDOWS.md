@@ -52,6 +52,8 @@ Exit Layer before replacing preferences from a backup. Copy complete project fol
 
 For game audio, choose the system mix or individual applications. Selecting both can duplicate playback. Per-application audio uses WASAPI process loopback and requires Windows build 20348 or later. If an application is missing, start its audio playback and use **Refresh audio**. A selected capture microphone is a recording track. Set the Voice Control microphone separately.
 
+**Focused monitor** follows the mouse pointer when you start a capture. If the pointer is outside the active monitor bounds, Layer uses the primary display. If a profile came from Linux or its named monitor has been disconnected, select a Windows capture target in that profile before starting.
+
 To exclude applications, use **Record audio from all applications except the selected ones** in a GSR audio track. Add the applications you want to exclude and remove any system output from that track. Layer refreshes the eligible Windows audio sessions as applications start playback or restart, including during livestreams. WASAPI captures a process and its children together. Layer skips a process tree that contains an excluded application at discovery time, so an audio process launched under an already captured parent can be heard until the next scan. With no eligible sessions, a recording track starts once a source appears, while a livestream carries silence on its existing audio track. Remove system output from the entire livestream mix to prevent it from reintroducing excluded audio.
 
 ### Make a recording

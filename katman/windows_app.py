@@ -25,7 +25,7 @@ from .windows_capture import (
     video_resolution, window_source,
 )
 from .windows_hotkeys import GlobalHotkeys, hotkey_bindings
-from .windows_screenshot import capture_monitor, gsr_settings, is_monitor_target
+from .windows_screenshot import capture_monitor, gsr_settings
 from .windows_output import capture_output
 from .windows_webcam import camera_inventory, gsr_webcam
 
@@ -442,7 +442,7 @@ def capture_controls(library, *, background=False):
                 if target == "region":
                     launch_overlay("region", region_capture=kind)
                     return
-                if target == "focused_monitor" or is_monitor_target(target):
+                if target != "window":
                     try:
                         selected = [capture_monitor(target)]
                         chosen_monitor = True

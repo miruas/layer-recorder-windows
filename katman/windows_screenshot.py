@@ -46,6 +46,8 @@ def is_monitor_target(source):
 
 
 def capture_monitor(source):
+    if source != "focused_monitor" and not is_monitor_target(source):
+        raise RuntimeError("Select a supported capture target in GSR settings.")
     monitors = displays()
     if not monitors:
         raise RuntimeError("No active monitor to capture.")
@@ -67,8 +69,9 @@ def capture_monitor(source):
                 raise ctypes.WinError(ctypes.get_last_error())
         finally:
             user32.SetThreadDpiAwarenessContext(previous)
+        primary = next((item for item in monitors if item.primary), monitors[0])
         monitor = next((item for item in monitors if item.x <= point.x < item.x + item.width
-                        and item.y <= point.y < item.y + item.height), monitors[0])
+                        and item.y <= point.y < item.y + item.height), primary)
     return monitor
 
 
