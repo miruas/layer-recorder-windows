@@ -22,7 +22,7 @@ from katman.windows_audio import (
     AudioSource, audio_encoder_command, capture_audio_command, gsr_audio_selection, gsr_recording_audio, mix_audio,
     mix_live_audio,
 )
-from katman.windows_stream import CustomDestination, Livestream, stream_frame_rate, stream_video_command
+from katman.windows_stream import CustomDestination, Livestream, sanitize_stream_error, stream_frame_rate, stream_video_command
 from katman.windows_output import CaptureOutput, capture_output, safe_component
 from katman.windows_screenshot import capture_monitor, save_image, screenshot_source
 from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
@@ -30,6 +30,22 @@ from katman.windows_tray import capture_notification
 
 
 class ReplayTests(unittest.TestCase):
+    def test_livestream_progress_requires_a_published_video_frame(self):
+        stream = Livestream.__new__(Livestream)
+        stream.started = threading.Event()
+        stream.process = Mock(stdout=io.BytesIO(b"frame=0\nprogress=continue\n"))
+        stream._read_progress()
+        self.assertFalse(stream.started.is_set())
+        stream.process.stdout = io.BytesIO(b"frame=2\nprogress=continue\n")
+        stream._read_progress()
+        self.assertTrue(stream.started.is_set())
+
+    def test_livestream_diagnostics_remove_urls_and_standalone_credentials(self):
+        self.assertEqual(
+            sanitize_stream_error("Rejected https://example.test/live?key=abc token abc", ["abc"]),
+            "Rejected [destination] token [hidden]",
+        )
+
     def test_wgc_crops_before_resizing_and_keeps_ten_bit_gpu_surfaces(self):
         monitor = Display("DISPLAY2", -1920, 0, 1920, 1080)
         region = Display("Selected region", -1820, 80, 1000, 500)

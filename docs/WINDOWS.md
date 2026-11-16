@@ -176,7 +176,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | Voice Control will not listen | Install the English speech model, choose an available microphone, then enable and apply. If the native recognition library reports missing runtime DLLs, install or repair the [Microsoft Visual C++ x64 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist). |
 | The listener is active but ignores a command | Speak the wake phrase and full configured command together. Check the selected microphone, Windows input level and template. Try a distinct wake phrase if recognition is unreliable. If the recorder was busy, retry once it is ready. |
 | Voice replay asks for more history | Verify that Instant Replay or recording is active. Check the available seconds in the recorder, wait for the buffer to fill, or request a shorter clip. |
-| Stream will not connect | Check service URL, key or bearer token, container/protocol pairing and whether the receiver is accepting connections. For WHIP use H.264 and an HTTP or HTTPS WHIP endpoint. |
+| Stream will not connect | The recorder shows **Connecting livestream…** until FFmpeg reports video output. If publishing fails, the status area shows recent FFmpeg diagnostics with destination URLs and configured credentials removed. Check the service URL, key or bearer token, container/protocol pairing and whether the receiver is accepting connections. For WHIP use H.264 and an HTTP or HTTPS WHIP endpoint. |
 
 ## Implementation and verification status
 

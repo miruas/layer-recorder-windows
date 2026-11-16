@@ -192,6 +192,7 @@ def capture_controls(library, *, background=False):
     last_audio_inventory = None
     capture = None
     stream = None
+    stream_running = False
     replay_save_lengths = {}
     mode = None
     overlay = None
@@ -220,6 +221,15 @@ def capture_controls(library, *, background=False):
             tray, tray_ready = create_tray(tray_events, icon_file)
         except (ImportError, OSError):
             pass
+
+    def notify_capture(action, value):
+        if not (tray_ready and tray_ready.is_set() and tray.visible and tray.HAS_NOTIFICATION):
+            return
+        if message := capture_notification(action, value, mode, gsr_settings):
+            try:
+                tray.notify(message, "Layer Recorder")
+            except (OSError, RuntimeError, ValueError):
+                pass
 
     def show():
         root.deiconify()
@@ -858,7 +868,7 @@ def capture_controls(library, *, background=False):
     def poll():
         nonlocal voice_pending
         nonlocal capture, stream, mode, busy, closing, next_inventory, next_audio_inventory, active_display_count
-        nonlocal next_power_check
+        nonlocal next_power_check, stream_running
         if instance.show_requested():
             show()
         try:
@@ -882,16 +892,12 @@ def capture_controls(library, *, background=False):
             pass
         else:
             busy = False
-            if error is None and tray_ready and tray_ready.is_set() and tray.visible and tray.HAS_NOTIFICATION:
-                if message := capture_notification(action, value, mode, gsr_settings):
-                    try:
-                        tray.notify(message, "Layer Recorder")
-                    except (OSError, RuntimeError, ValueError):
-                        # Capture has already succeeded even if Explorer cannot show a notification.
-                        pass
+            if error is None and action != "stream_start":
+                notify_capture(action, value)
             if action == "stream_start" and error is None:
                 stream = value
-                status.set("Livestream running.")
+                stream_running = False
+                status.set("Connecting livestream…")
             elif action == "stream_stop":
                 stream = None
                 if error is None:
@@ -964,11 +970,16 @@ def capture_controls(library, *, background=False):
             if closing and not busy:
                 return
         if stream is not None and not busy and stream.poll() is not None:
-            error = stream.audio_error
+            error = stream.failure_message()
+            summary = "Livestream ended." if stream_running else "Livestream could not start."
             stream.stop()
             stream = None
-            status.set(error or "Livestream ended. Check the destination and stream key.")
+            status.set(f"{summary}\n{error}" if error else f"{summary} Check the destination and stream key.")
             show()
+        elif stream is not None and not stream_running and stream.started.is_set():
+            stream_running = True
+            status.set("Livestream running.")
+            notify_capture("stream_start", None)
 
         if hotkeys and not closing:
             try:

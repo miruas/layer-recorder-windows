@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Publish a Windows capture using the GSR streaming destination."""
+import re
 import subprocess
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from .windows_capture import (
     capture_command, desktop_duplication_command, displays, dxgi_targets, gsr_frame_rate, scale_video,
@@ -171,16 +173,51 @@ class Livestream:
             command.extend(["-f", destination.container, destination.url])
         else:
             command.extend(["-rw_timeout", "5000000", "-f", "flv", destination])
+        command[1:1] = ["-nostats", "-stats_period", "0.25", "-progress", "pipe:1"]
+        url = destination.url if isinstance(destination, (WhipDestination, CustomDestination)) else destination
+        self.log_secrets = [url]
+        parsed = urlsplit(url)
+        self.log_secrets.extend((parsed.username, parsed.password))
+        self.log_secrets.extend(value for _, value in parse_qsl(parsed.query))
+        if whip and destination.token:
+            self.log_secrets.append(destination.token)
+        if not whip:
+            self.log_secrets.append(parsed.path.rsplit("/", 1)[-1])
+        self.started = threading.Event()
+        self.errors = deque(maxlen=6)
         self.audio_stop = threading.Event()
         self.audio_thread = None
         self.audio_error = None
         self.process = subprocess.Popen(
-            command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW,
+            command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
         )
+        self.progress_thread = threading.Thread(target=self._read_progress, daemon=True)
+        self.error_thread = threading.Thread(target=self._read_errors, daemon=True)
+        self.progress_thread.start()
+        self.error_thread.start()
         if audio or discover_audio is not None:
             self.audio_thread = threading.Thread(target=self._feed_audio, args=(audio, discover_audio), daemon=True)
             self.audio_thread.start()
+
+    def _read_progress(self):
+        with self.process.stdout as pipe:
+            for line in pipe:
+                if line.startswith(b"frame="):
+                    count = line[6:].strip()
+                    if count.isdigit() and int(count) > 0:
+                        self.started.set()
+
+    def _read_errors(self):
+        with self.process.stderr as pipe:
+            for raw in pipe:
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line:
+                    self.errors.append(sanitize_stream_error(line, self.log_secrets)[:240])
+
+    def failure_message(self):
+        self.error_thread.join(timeout=.2)
+        return self.audio_error or "\n".join(tuple(self.errors.copy())[-3:])
 
     def _feed_audio(self, sources, discover):
         try:
@@ -220,3 +257,12 @@ class Livestream:
                 self.audio_thread.join(timeout=2)
             else:
                 self.process.stdin.close()
+            self.progress_thread.join(timeout=2)
+            self.error_thread.join(timeout=2)
+
+
+def sanitize_stream_error(message, secrets):
+    message = re.sub(r"\b[a-z][a-z0-9+.-]*://[^\s\"'<>]+", "[destination]", message, flags=re.I)
+    for secret in sorted(filter(None, secrets), key=len, reverse=True):
+        message = message.replace(secret, "[hidden]")
+    return message
