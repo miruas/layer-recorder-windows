@@ -88,8 +88,9 @@ The Windows notification-area icon delivers capture notifications using the
 GSR preference for each profile. The recorder continues to show the result
 in its status area when Windows suppresses a notification.
 Record, Replay and Livestream honor the configured output resolution. Odd
-dimensions round up to even sizes for H.264. Resizing uses the GDI capture
-path with the selected encoder.
+dimensions round up to even sizes for H.264. Compatible NVENC Record and
+Replay profiles resize on Direct3D surfaces using Windows Graphics Capture.
+Resized livestreams use GDI with the selected encoder.
 When Region is selected, Record and Replay open the same drag selector and
 capture only the selected rectangle.
 Window capture targets the foreground window when the overlay opens.

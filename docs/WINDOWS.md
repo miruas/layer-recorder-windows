@@ -3,6 +3,7 @@
 Layer Recorder brings the Layer-patched GPU Screen Recorder (GSR) overlay and Layer Studio to Windows. The Rust capture engine supervises FFmpeg video and WASAPI audio producers, retains encoded Instant Replay fragments in RAM, and writes independent media tracks into Layer projects.
 
 - [Install and open Layer](#install-and-open-layer)
+- [Make your first clip](#make-your-first-clip)
 - [Record and save Instant Replay](#record-and-save-instant-replay)
 - [Voice Control](#voice-control)
 - [Livestream and take screenshots](#livestream-and-take-screenshots)
@@ -14,8 +15,8 @@ Layer Recorder brings the Layer-patched GPU Screen Recorder (GSR) overlay and La
 
 ## Install and open Layer
 
-1. Open the **Windows capture and editor** workflow for the branch you want. For the build that introduced Voice Control, use the [verified Voice Control workflow run](https://github.com/miruas/layer-recorder-windows/actions/runs/43735470674).
-2. Download the **Layer-Setup-x64** artifact, extract the downloaded ZIP, and run **Layer-Setup-x64.exe**. The artifact includes a SHA-256 checksum. Setup installs for the current Windows user and downloads a checksum-verified FFmpeg build on first installation if needed. Python and the media workers run from Layer's private installation directory.
+1. Open the **Windows capture and editor** workflow, choose a successful run on the `voice-control` branch, and scroll to **Artifacts**. Sign in to GitHub if needed to download an artifact. [Windows workflow runs](https://github.com/miruas/layer-recorder-windows/actions/workflows/windows.yml?query=branch%3Avoice-control)
+2. Download **Layer-Setup-x64**, extract the ZIP, and run **Layer-Setup-x64.exe**. To verify the installer, run `Get-FileHash .\Layer-Setup-x64.exe -Algorithm SHA256` from the extracted folder and compare the result with the included checksum. Setup installs for the current Windows user, by default in `%LOCALAPPDATA%\Programs\Layer Recorder`. It downloads a checksum-verified FFmpeg build if the private media tools are missing. Python and the media workers run from Layer's private installation directory.
 3. Choose whether to add a desktop shortcut, start Layer at sign-in, or add Studio to **Open with** for `.katman` projects. Open **Layer Recorder** or **Layer Studio** from Start.
 4. Press **Alt+Z** to open the GSR overlay. If the shortcut is occupied, right-click the Layer icon in the notification area and choose **Toggle overlay**. The overlay's main gear opens the Windows recorder controls. Each capture card has its own GSR settings. Recording, pause, replay and livestream states update while the overlay stays open.
 
@@ -24,6 +25,23 @@ Closing the recorder window leaves Layer in the notification area when the tray 
 The recorder uses Windows notifications for capture activity and saved recordings, replays and screenshots. Each GSR profile has its own **Show notifications** setting. Windows notification settings control whether the alert appears on screen.
 
 The workflow also produces a **Layer-Windows-x64** portable artifact for source-style use. Its startup and dependencies are covered under [Build from source](#build-from-source).
+
+### Back up projects and preferences
+
+| Location | Contents |
+| --- | --- |
+| `%USERPROFILE%\Videos\Layer` | Default Layer project library. Also back up any custom capture folders you chose in GSR. |
+| `%APPDATA%\Layer` | Per-user preferences, including GSR profiles in `GSR`, voice commands in `voice-control.json`, and Windows shortcut settings. |
+| `%LOCALAPPDATA%\Layer\voice-models` | Downloaded speech model. You can reinstall it from the Voice Control dialog. |
+
+Exit Layer before replacing preferences from a backup. Copy complete project folders with their `media` directories.
+
+## Make your first clip
+
+1. Launch **Layer Recorder**, press **Alt+Z**, and open **Instant Replay → Settings**. Choose the display where you will play, 60 FPS if supported, H.264 with automatic encoder selection, and your system audio output. Set the replay buffer to at least 30 seconds and the short save length to 30 seconds.
+2. Start Instant Replay from its card or with **Shift+Alt+F10**. Return to the game and wait at least 30 seconds.
+3. Press **Alt+F11** to save the configured short duration. For an exact 30-second test with Voice Control enabled, say “Kivo, last thirty seconds” using your configured wake phrase.
+4. Press **Win+Alt+Z**, open the saved project, and play it through. Check that the expected display and game audio are present. Export an MP4 and play the exported file before relying on the setup for a long session.
 
 ## Record and save Instant Replay
 
@@ -195,7 +213,9 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 ### Verified
 
 - The [Windows workflow for the original Voice Control commit](https://github.com/miruas/layer-recorder-windows/actions/runs/43735470674) passed. It ran capture, Voice Control, native Studio and GSR overlay checks, verified the portable ZIP and built the x64 installer. The matching [test and package workflow](https://github.com/miruas/layer-recorder-windows/actions/runs/43735470613) also passed.
-- On the development PC, 34 Windows tests passed and one shortcut test was skipped because a running Layer instance already owned a binding. Native Windows capture testing exercised physical 1920×1080 capture, software H.264, NVIDIA NVENC and WASAPI system, microphone and application audio. Synthetic tests cover independent tracks, reconnects and timeline behavior.
+- The Windows workflow for `8ef0c5d` passed capture, Voice Control, Studio, overlay and portable verification and produced x64 Setup. The workflow run verifies packaging and the overlay behavior covered by its tests. [Windows workflow for resized NVENC capture](https://github.com/miruas/layer-recorder-windows/actions/runs/43850767103)
+- The Windows workflow for `e16d4ca` also passed the installed Setup lifecycle test. It verified a clean per-user install, startup registration, launching with the background flag, reopening the existing instance, preserving both enabled and disabled startup choices through upgrades, and removing installed files and registrations. [Windows Setup lifecycle run](https://github.com/miruas/layer-recorder-windows/actions/runs/43853542135)
+- Native Windows capture testing on the development PC exercised physical 1920×1080 capture, software H.264, NVIDIA NVENC and WASAPI system, microphone and application audio. Synthetic tests cover independent tracks, reconnects and timeline behavior.
 - The AMD Radeon device passed the AMF H.264 startup probe and produced a recording and a two-second replay through the Rust capture engine, both with synthetic video and while capturing a real 320×240 Windows test window through GDI. Automatic selection chose AMF when the test excluded NVENC. The updated Windows suite passed all 36 tests, including shortcut registration.
 - Voice checks covered command add/edit/delete in the dialog, live WASAPI microphone open and release, and synthesized English input for the `Kivo` examples, including 180-, 30- and 135-second replay requests. Recording, replay and export regressions also passed with the listener active. In a quiet 10-second Razer Barracuda X test, the listener used approximately 0.47% of one CPU core and performed no speech decoding. This is an idle sample from one machine.
 - Local receiver tests covered WHIP video/audio and session termination, RTMP/FLV, fragmented MP4 and MPEG-TS over TCP, and HLS over HTTP PUT. See the [GSR port notes](https://github.com/miruas/layer-recorder-windows/blob/voice-control/docs/GSR_WINDOWS_PORT.md).
@@ -208,14 +228,27 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | Area | Current limitation or open verification |
 | --- | --- |
 | Overlay coverage | The overlay is available over the desktop and borderless windows. Exclusive fullscreen can bypass desktop composition. Test shortcut ownership and behavior on the target game. |
-| Linux parity | Inverted application audio uses Windows sessions and process trees. Complete parity for shared process trees remain open. Webcam discovery and composition have automated coverage using a simulated inventory and video inputs. Physical camera capture, timing and reconnect testing remain open. Linux-specific KMS, PipeWire/portal and compositor options have no equivalent workflow in this guide. |
+| Linux parity | Inverted application audio uses Windows sessions and process trees. Full parity for shared process trees remains open. Webcam discovery and composition have automated coverage using a simulated inventory and video inputs. Physical camera capture, timing and reconnect testing remain open. KMS, PipeWire/portal and compositor-specific options are Linux-only. |
 | GPU coverage | AMD AMF recording and replay were tested on a real Windows window and with synthetic video. Full-display and gameplay testing on AMD, physical Intel Quick Sync, multi-monitor and mixed-DPI validation remain open. The documented NVIDIA 10-bit path captures SDR. Full HDR capture and color-management parity are unverified. |
 | Audio timing | Independently launched media producers have approximate start alignment. Broad device and workload testing for latency, drift and sync remains pending. |
 | Replay transitions | Recording within replay preserves the buffer and uses its existing sources. Changing capture settings requires restarting the replay session. The recording starts at a fragment boundary, and effective replay duration is constrained by the RAM budget and retained video. |
 | Automatic game detection | Windows currently uses Steam's running-game data. Other launchers and standalone games remain outside automatic detection. |
 | Voice field testing | Language support is English. The current wake phrase match follows voice-activity-gated transcription. Live-speaker accuracy across voices, accents, microphones and gameplay noise, along with false-trigger rates and in-game FPS and audio-sync impact, has not been systematically measured. |
 | Stream compatibility | Service profiles and the verified receiver combinations are covered above. Every allowed container/protocol pair and production service configuration has not been tested. |
-| Distribution coverage | Windows CI includes a Setup lifecycle test for fresh installation, launch at sign-in, second launch, silent upgrade, and uninstall on the hosted Windows image. Other Windows versions and device configurations remain a manual compatibility matrix. |
+| Distribution coverage | Windows CI includes a Setup lifecycle test for fresh installation, sign-in configuration and background launch, second launch, silent upgrade, and uninstall. Verify its result for the specific build you download. Actual sign-out/sign-in, Explorer restart recovery and broader Windows/device coverage remain separate checks. |
+
+### Test a build on your PC
+
+Use these checks when validating a new build, GPU driver, display layout or microphone.
+
+| Check | Expected result |
+| --- | --- |
+| Installed launch and tray | Start Layer, close the recorder window, and reopen it from Start. Confirm the same instance opens. With launch at sign-in enabled, sign out and back in, then confirm the tray icon and Alt+Z work. |
+| Capture and replay | Use the same game and settings for a software and hardware encoder test. Play the resulting clips from Studio and compare frame pacing, cursor behavior and audio. Run a longer recording to check for drift. |
+| Source changes | With replay active, connect or disconnect a monitor or restart a captured audio application. Inspect track continuity and check that a voice replay request spanning a video gap is rejected. |
+| Voice Control | Try custom start, stop, toggle and replay phrases with the game idle and playing. Include an immediate duplicate, a phrase without the wake word and a duration longer than the available history. Disable Voice Control and check that the Windows microphone indicator clears unless another app or recording is using it. |
+| Voice overhead | Repeat the same gameplay sequence with Voice Control off and on, using the same capture settings. Compare recorder CPU use, game frame times and exported audio sync. Record the microphone and ambient conditions when reporting results. |
+| Packaging | Upgrade the installed build, reopen an existing project, and confirm the startup choice and Voice Control preferences survived. If testing uninstall, close Layer first and verify the project and preferences are still available afterward. |
 
 ## Build from source
 
