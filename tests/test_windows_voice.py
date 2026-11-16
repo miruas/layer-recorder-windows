@@ -122,10 +122,10 @@ class SpeechGateTests(unittest.TestCase):
         listener = VoiceListener()
         starting = threading.Event()
 
-        def listen(config, stop, emit):
+        def listen(config, stop, frames, emit):
             emit("command", VoiceMatch("start_recording"))
             starting.set()
-            stop.wait(2)
+            frames.get(timeout=8)
 
         with patch.object(listener, "_listen", side_effect=listen):
             listener.configure(VoiceConfig(enabled=True))
@@ -134,6 +134,7 @@ class SpeechGateTests(unittest.TestCase):
                 listener.configure(VoiceConfig())
                 listener._thread.join(2)
                 self.assertFalse(listener._thread.is_alive())
+                self.assertIsNone(listener._frames)
                 events = list(listener.read())
                 self.assertEqual(events[-1], ("status", "Voice Control is off."))
                 self.assertFalse(any(kind == "command" for kind, _ in events))

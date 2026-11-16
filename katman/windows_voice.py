@@ -105,6 +105,13 @@ class SpeechGate:
         return audio
 
 
+def wake_listener(frames):
+    try:
+        frames.put_nowait(None)
+    except queue.Full:
+        pass  # An existing packet already wakes the consumer.
+
+
 class VoiceListener:
     """One worker, one microphone. The UI only receives status and matched actions."""
 
@@ -112,6 +119,7 @@ class VoiceListener:
         self.events = queue.SimpleQueue()
         self._thread = None
         self._stop = None
+        self._frames = None
         self._config = None
         self._generation = 0
         self._started = 0
@@ -121,7 +129,7 @@ class VoiceListener:
         self._config = config
         if self._thread is not None and self._thread.is_alive():
             self.events.put((self._generation, "status", "Updating Voice Control…"))
-            self._stop.set()
+            self._cancel()
             return
         self._launch()
 
@@ -132,7 +140,8 @@ class VoiceListener:
             self.events.put((self._generation, "status", "Voice Control is off."))
             return
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, args=(config, self._stop, self._generation),
+        self._frames = queue.Queue(maxsize=40)
+        self._thread = threading.Thread(target=self._run, args=(config, self._stop, self._frames, self._generation),
                                         name="Layer Voice Control", daemon=True)
         self._thread.start()
 
@@ -150,21 +159,30 @@ class VoiceListener:
     def close(self):
         self._generation += 1
         self._config = None
+        self._cancel()
+
+    def _cancel(self):
         if self._stop is not None:
             self._stop.set()
+        frames, self._frames = self._frames, None
+        if frames is not None:
+            wake_listener(frames)
 
-    def _run(self, config, stop, generation):
+    def _run(self, config, stop, frames, generation):
         def emit(kind, value):
             if not stop.is_set():
                 self.events.put((generation, kind, value))
 
         try:
-            self._listen(config, stop, emit)
+            self._listen(config, stop, frames, emit)
         except Exception as error:
             emit("status", f"Voice Control: {error}")
+        finally:
+            if self._frames is frames:
+                self._frames = None
 
     @staticmethod
-    def _listen(config, stop, emit):
+    def _listen(config, stop, frames, emit):
         model_path = local_model()
         import numpy as np
         import sounddevice as sd
@@ -191,7 +209,6 @@ class VoiceListener:
             return
         matcher = CommandMatcher(config)
         vad, gate = webrtcvad.Vad(3), SpeechGate()
-        frames = queue.Queue(maxsize=40)
         interrupted = threading.Event()
         finished = threading.Event()
         last = None
@@ -209,10 +226,7 @@ class VoiceListener:
 
         def on_finished():
             finished.set()
-            try:
-                frames.put_nowait(None)
-            except queue.Full:
-                pass
+            wake_listener(frames)
 
         with sd.RawInputStream(device=device, channels=1, samplerate=RATE, blocksize=FRAME,
                                dtype="int16", extra_settings=sd.WasapiSettings(auto_convert=True),
@@ -220,10 +234,10 @@ class VoiceListener:
             emit("status", f"Listening for “{config.wake_phrase}” · {devices[device]}")
             while not stop.is_set():
                 pcm = frames.get()
-                if finished.is_set() or pcm is None:
-                    if not stop.is_set():
-                        raise RuntimeError("The microphone stream ended. Check the device and reapply settings.")
+                if stop.is_set():
                     break
+                if finished.is_set() or pcm is None:
+                    raise RuntimeError("The microphone stream ended. Check the device and reapply settings.")
                 if interrupted.is_set():
                     interrupted.clear()
                     while True:
