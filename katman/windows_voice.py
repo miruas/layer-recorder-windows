@@ -78,6 +78,10 @@ class SpeechGate:
         self.quiet = self.voiced = 0
         self.discarding = False
 
+    def interrupt(self):
+        self.reset()
+        self.discarding = True
+
     def push(self, pcm, speech):
         if self.discarding:
             self.quiet = 0 if speech else self.quiet + 1
@@ -275,10 +279,10 @@ class VoiceListener:
                         if not stop.is_set():
                             raise RuntimeError("The microphone stream ended. Check the device and reapply settings.")
                         break
-                    gate.reset()
+                    gate.interrupt()
                     continue
                 if len(pcm) != FRAME * 2:
-                    gate.reset()
+                    gate.interrupt()
                     continue
                 samples = np.frombuffer(pcm, dtype="<i2")
                 speech = np.linalg.norm(samples) >= MIN_RMS * FRAME**0.5 and vad.is_speech(pcm, RATE)

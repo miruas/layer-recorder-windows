@@ -150,6 +150,21 @@ class SpeechGateTests(unittest.TestCase):
         else:
             self.fail("Intermittent background noise blocked the utterance endpoint.")
 
+    def test_interrupted_microphone_audio_waits_for_a_new_utterance(self):
+        gate = SpeechGate()
+        for _ in range(14):
+            gate.push(b"before", True)
+        gate.interrupt()
+        for _ in range(14):
+            self.assertIsNone(gate.push(b"after", True))
+        for _ in range(18):
+            self.assertIsNone(gate.push(b"quiet", False))
+        for _ in range(14):
+            self.assertIsNone(gate.push(b"fresh", True))
+        for _ in range(17):
+            self.assertIsNone(gate.push(b"quiet", False))
+        self.assertEqual(gate.push(b"quiet", False), b"fresh" * 14 + b"quiet" * 6)
+
     def test_disable_and_reconfigure_drops_old_commands(self):
         listener = VoiceListener()
         starting = threading.Event()
