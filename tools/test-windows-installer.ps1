@@ -64,6 +64,21 @@ function Launch-Recorder([string[]]$arguments) {
     }
 }
 
+function Wait-RecorderWindow($recorder, [bool]$visible, [string]$failure) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $recorder.Refresh()
+        if ($recorder.HasExited) { throw "$failure Recorder exited unexpectedly." }
+        $running = @(Recorder-Processes)
+        if ($running.Count -eq 1 -and $running[0].Id -eq $recorder.Id -and
+            ($recorder.MainWindowHandle -ne 0) -eq $visible) {
+            return
+        }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw $failure
+}
+
 function Run-Uninstall {
     $uninstaller = Get-ChildItem -LiteralPath $install -Filter 'unins*.exe' -ErrorAction SilentlyContinue |
         Select-Object -First 1
@@ -129,17 +144,11 @@ try {
         throw 'The sign-in command did not leave the recorder in the background.'
     }
     Launch-Recorder @()
-    $deadline = [DateTime]::UtcNow.AddSeconds(10)
-    do {
-        Start-Sleep -Milliseconds 100
-        $running = @(Recorder-Processes)
-        if ($running.Count -eq 1 -and $running[0].Id -eq $first.Id -and $running[0].MainWindowHandle -ne 0) {
-            break
-        }
-    } while ([DateTime]::UtcNow -lt $deadline)
-    if ($running.Count -ne 1 -or $running[0].Id -ne $first.Id -or $running[0].MainWindowHandle -eq 0) {
-        throw 'A second launch did not show the existing recorder window.'
-    }
+    Wait-RecorderWindow $first $true 'A second launch did not show the existing recorder window.'
+    if (!$first.CloseMainWindow()) { throw 'Could not send the recorder window a close request.' }
+    Wait-RecorderWindow $first $false 'Closing the window did not leave the recorder in the notification area.'
+    Launch-Recorder @()
+    Wait-RecorderWindow $first $true 'Launching after closing the window did not reopen the same recorder.'
     $first | Stop-Process -ErrorAction Stop
     $first.WaitForExit()
 
