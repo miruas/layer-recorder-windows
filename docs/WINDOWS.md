@@ -126,7 +126,7 @@ For `clip {duration} of that`, say “Kivo, clip one minute and ten seconds of t
 
 ### Screenshots
 
-Open the overlay's screenshot settings to select the target, PNG or JPEG, save directory, optional resize, and disk or clipboard output. At least one destination must be enabled. Application folder and naming settings apply to disk output. **Print Screen** captures the configured target. **Shift+Print Screen** captures the foreground window. **Ctrl+Print Screen** opens a region selector on the cursor monitor. Drag to select or press **Escape** to cancel.
+Open the overlay's screenshot settings to select the target, PNG or JPEG, save directory, optional resize, and disk or clipboard output. At least one destination must be enabled. **Record cursor** applies to monitor, window and region screenshots. Application folder and naming settings apply to disk output. **Print Screen** captures the configured target. **Shift+Print Screen** captures the foreground window. **Ctrl+Print Screen** opens a region selector on the cursor monitor. Drag to select or press **Escape** to cancel.
 
 ## Edit and export
 

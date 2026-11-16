@@ -136,7 +136,7 @@ def take_screenshot(source, settings, clipboard_owner=None, *, window=None):
     extension = "png" if settings.get("image_format") == "png" else "jpg"
     quality = {"medium": "6", "high": "4", "very_high": "2", "ultra": "1"}
     command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "gdigrab",
-               "-draw_mouse", "1" if settings.get("record_cursor", True) and source[-1] == "desktop" else "0",
+               "-draw_mouse", "1" if settings.get("record_cursor", True) else "0",
                "-framerate", "1", *source, "-frames:v", "1"]
     if settings.get("change_image_resolution"):
         width, height = settings.get("image_width"), settings.get("image_height")

@@ -407,7 +407,7 @@ def set_capture_cursor(command, enabled):
 
 def video_cursor(options):
     value = options.get("record_cursor") if isinstance(options, dict) else None
-    return value if type(value) is bool else None
+    return value if type(value) is bool else True
 
 
 def video_color_range(options):

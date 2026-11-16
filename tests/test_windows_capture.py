@@ -15,7 +15,7 @@ from katman.common import load_project, probe
 from katman.export import export_project
 from katman.windows_capture import (
     Capture, Display, ReplayAutostart, capture_binary, capture_command, desktop_duplication_command, dxgi_targets,
-    graphics_capture_command, gsr_h264_encoder, replay_autostart_trigger, set_capture_cursor,
+    graphics_capture_command, gsr_h264_encoder, replay_autostart_trigger, set_capture_cursor, video_cursor,
     gsr_recording_encoder, set_video_framerate_mode, set_video_rate_control, video_framerate_mode,
 )
 from katman.windows_audio import (
@@ -24,12 +24,29 @@ from katman.windows_audio import (
 )
 from katman.windows_stream import CustomDestination, Livestream, sanitize_stream_error, stream_frame_rate, stream_video_command
 from katman.windows_output import CaptureOutput, capture_output, safe_component
-from katman.windows_screenshot import capture_monitor, save_image, screenshot_source
+from katman.windows_screenshot import capture_monitor, save_image, screenshot_source, take_screenshot
 from katman.windows_webcam import add_webcam, camera_inventory, gsr_webcam
 from katman.windows_tray import capture_notification
 
 
 class ReplayTests(unittest.TestCase):
+    def test_window_screenshot_honors_the_gsr_cursor_setting(self):
+        with (patch.object(subprocess, "CREATE_NO_WINDOW", 0, create=True),
+              patch("katman.windows_screenshot.subprocess.run") as run,
+              patch("katman.windows_screenshot.save_image")):
+            run.return_value = Mock(returncode=0, stdout=b"image")
+            for settings, expected in (({}, "1"), ({"record_cursor": False}, "0")):
+                take_screenshot(["-i", "hwnd=100"], settings)
+                command = run.call_args.args[0]
+                self.assertEqual(command[command.index("-draw_mouse") + 1], expected)
+
+    def test_gsr_window_recording_defaults_to_including_the_cursor(self):
+        command = capture_command(Display("Window", 0, 0, 640, 480, window=100), 30, "libx264")
+        set_capture_cursor(command, video_cursor({}))
+        self.assertEqual(command[command.index("-draw_mouse") + 1], "1")
+        set_capture_cursor(command, video_cursor({"record_cursor": False}))
+        self.assertEqual(command[command.index("-draw_mouse") + 1], "0")
+
     def test_livestream_progress_requires_a_published_video_frame(self):
         stream = Livestream.__new__(Livestream)
         stream.started = threading.Event()
