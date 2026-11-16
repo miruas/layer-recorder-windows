@@ -111,6 +111,16 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           ./tools/build-windows-installer.ps1 -PythonRoot $env:pythonLocation -Stage "$env:RUNNER_TEMP/layer-setup-stage" -Output . -Compiler $compiler
+      - name: Verify Windows Setup lifecycle
+        if: github.event_name == 'push'
+        run: ./tools/test-windows-installer.ps1 -Installer ./Layer-Setup-x64.exe -TestDirectory "$env:RUNNER_TEMP/layer-setup-test"
+      - name: Upload Setup diagnostics
+        if: failure() && github.event_name == 'push'
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-setup-test-logs
+          path: ${{ runner.temp }}/layer-setup-test/*.log
+          if-no-files-found: ignore
       - name: Upload Windows Setup
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v6

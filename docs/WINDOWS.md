@@ -215,7 +215,7 @@ Global shortcuts work while Layer runs, including in the tray. The recorder can 
 | Automatic game detection | Windows currently uses Steam's running-game data. Other launchers and standalone games remain outside automatic detection. |
 | Voice field testing | Language support is English. The current wake phrase match follows voice-activity-gated transcription. Live-speaker accuracy across voices, accents, microphones and gameplay noise, along with false-trigger rates and in-game FPS and audio-sync impact, has not been systematically measured. |
 | Stream compatibility | Service profiles and the verified receiver combinations are covered above. Every allowed container/protocol pair and production service configuration has not been tested. |
-| Distribution coverage | CI builds the installer and verifies the portable package. Fresh-machine installation, upgrade and uninstall across Windows versions and device configurations remain a manual compatibility matrix. |
+| Distribution coverage | Windows CI includes a Setup lifecycle test for fresh installation, launch at sign-in, second launch, silent upgrade, and uninstall on the hosted Windows image. Other Windows versions and device configurations remain a manual compatibility matrix. |
 
 ## Build from source
 
