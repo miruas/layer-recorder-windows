@@ -143,7 +143,7 @@ For editor controls and workflows, see [Studio interaction](https://github.com/m
 
 ## Default shortcuts
 
-Global shortcuts work while Layer runs, including in the tray. The recorder can disable them. The GSR hotkey settings can override supported GSR bindings.
+Global shortcuts work while Layer runs, including in the tray. The recorder can disable them. The GSR hotkey settings can override supported GSR bindings. A shortcut pressed during a brief capture operation waits for the recorder to become ready. If it cannot run within two seconds, the recorder reports that it expired.
 
 | Shortcut | Action |
 | --- | --- |

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Windows launcher and capture controls."""
 import argparse
+from collections import deque
 import ctypes
 from ctypes import wintypes
 from dataclasses import asdict
@@ -167,6 +168,7 @@ def capture_controls(library, *, background=False):
     voice_status = tk.StringVar(value="Voice Control is off.")
     voice = VoiceListener()
     voice_pending = None
+    pending_actions = deque(maxlen=8)
     cameras = ""
     camera_scan = None
 
@@ -541,7 +543,7 @@ def capture_controls(library, *, background=False):
         elif command.action == "stop_recording" and mode == "record":
             stop()
 
-    def toggle_stream(*, from_overlay=False):
+    def toggle_stream(*, window_handle=None):
         if stream is not None:
             submit("stream_stop", stream.stop)
             return
@@ -555,7 +557,7 @@ def capture_controls(library, *, background=False):
             if target == "region":
                 launch_overlay("region", region_capture="stream")
                 return
-            source = (window_source(overlay_window if from_overlay else foreground_window())
+            source = (window_source(foreground_window() if window_handle is None else window_handle)
                       if target == "window" else capture_monitor(target))
             launch_stream(source, stream_frame_rate(settings), destination, settings)
         except (OSError, RuntimeError, ValueError, AttributeError) as error:
@@ -682,8 +684,8 @@ def capture_controls(library, *, background=False):
             if pending_screenshot is not None:
                 action, window_handle = pending_screenshot
                 pending_screenshot = None
-                if not busy and not closing:
-                    start_screenshot(action, window_handle)
+                if not closing:
+                    queue_action(lambda: start_screenshot(action, window_handle))
             return
         if finished.returncode:
             status.set(f"GSR overlay exited with code {finished.returncode}.")
@@ -694,40 +696,43 @@ def capture_controls(library, *, background=False):
             show()
         elif action == b"exit":
             close()
-        elif not busy and action.startswith(b"region "):
-            from .windows_screenshot import desktop_source, screenshot_settings, take_screenshot
+        elif action.startswith(b"region "):
+            window_handle, region_capture = overlay_window, overlay_region_capture
+            queue_action(lambda: finish_overlay_region(action, region_capture, window_handle))
+        elif action in {b"toggle_record", b"toggle_replay", b"toggle_pause", b"save_replay", b"save_short", b"save_long",
+                       b"toggle_stream"}:
+            dispatch_hotkey(action.decode("ascii"), from_overlay=True, window_handle=overlay_window)
 
-            bounds = action.split()[1:]
-            if len(bounds) == 4:
-                try:
-                    x, y, width, height = (int(value) for value in bounds)
-                    if min(width, height) < 2:
-                        raise ValueError("Invalid region dimensions")
-                except ValueError:
-                    status.set("The GSR region coordinates were invalid.")
-                    return
-                if overlay_region_capture:
-                    region = Display("Selected region", x, y, width, height)
-                    if overlay_region_capture == "stream":
-                        from .windows_stream import stream_destination, stream_frame_rate
+    def finish_overlay_region(action, region_capture, window_handle):
+        from .windows_screenshot import desktop_source, screenshot_settings, take_screenshot
 
-                        try:
-                            settings = gsr_settings("streaming")
-                            launch_stream(region, stream_frame_rate(settings), stream_destination(settings), settings)
-                        except (ValueError, AttributeError) as error:
-                            status.set(str(error))
-                            show()
-                        return
-                    start(overlay_region_capture, use_gsr=True, region=region, window_handle=overlay_window)
+        bounds = action.split()[1:]
+        if len(bounds) == 4:
+            try:
+                x, y, width, height = (int(value) for value in bounds)
+                if min(width, height) < 2:
+                    raise ValueError("Invalid region dimensions")
+            except ValueError:
+                status.set("The GSR region coordinates were invalid.")
+                return
+            if region_capture:
+                region = Display("Selected region", x, y, width, height)
+                if region_capture == "stream":
+                    from .windows_stream import stream_destination, stream_frame_rate
+
+                    try:
+                        settings = gsr_settings("streaming")
+                        launch_stream(region, stream_frame_rate(settings), stream_destination(settings), settings)
+                    except (ValueError, AttributeError) as error:
+                        status.set(str(error))
+                        show()
                     return
-                source = desktop_source(x, y, width, height)
-                settings = screenshot_settings()
-                clipboard_owner = root.winfo_id()
-                submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner, window=overlay_window))
-        elif not busy and action in {b"toggle_record", b"toggle_replay", b"toggle_pause", b"save_replay", b"save_short", b"save_long"}:
-            handle_hotkey(action.decode("ascii"), from_overlay=True)
-        elif not busy and action == b"toggle_stream":
-            toggle_stream(from_overlay=True)
+                start(region_capture, use_gsr=True, region=region, window_handle=window_handle)
+                return
+            source = desktop_source(x, y, width, height)
+            settings = screenshot_settings()
+            clipboard_owner = root.winfo_id()
+            submit("screenshot", lambda: take_screenshot(source, settings, clipboard_owner, window=window_handle))
 
     def start_screenshot(action, window_handle=None):
         from .windows_screenshot import screenshot_settings, screenshot_source, take_screenshot
@@ -746,18 +751,32 @@ def capture_controls(library, *, background=False):
         except (OSError, RuntimeError) as error:
             status.set(str(error))
 
-    def handle_hotkey(action, *, from_overlay=False):
+    def queue_action(callback):
+        if len(pending_actions) == pending_actions.maxlen:
+            status.set("Too many capture commands are waiting. Try again when the recorder is ready.")
+            return
+        pending_actions.append((time.monotonic() + 2, callback))
+
+    def dispatch_hotkey(action, *, from_overlay=False, window_handle=None):
+        if action in {"toggle_overlay", "editor"}:
+            handle_hotkey(action)
+            return
+        if window_handle is None:
+            window_handle = overlay_window if overlay is not None else foreground_window()
+        queue_action(lambda: handle_hotkey(action, from_overlay=from_overlay, window_handle=window_handle))
+
+    def handle_hotkey(action, *, from_overlay=False, window_handle=None):
         nonlocal overlay_dismissed, pending_screenshot
         if action == "toggle_overlay":
             toggle_overlay()
         elif action == "toggle_stream":
-            toggle_stream()
+            toggle_stream(window_handle=window_handle)
         elif action == "toggle_pause":
             if capture is not None and mode == "record":
                 submit("pause", capture.toggle_pause)
         elif action in {"screenshot", "screenshot_window", "screenshot_region"}:
             if overlay is None:
-                start_screenshot(action)
+                start_screenshot(action, window_handle)
             else:
                 pending_screenshot = action, overlay_window or 0
                 overlay_dismissed = True
@@ -771,26 +790,26 @@ def capture_controls(library, *, background=False):
                         launch_overlay("region", region_capture="record")
                 else:
                     start("record", use_gsr=from_overlay or action != "toggle_record",
-                          window_handle=overlay_window if from_overlay else None,
+                          window_handle=window_handle,
                           force_window=action == "toggle_window_record")
             elif mode == "record":
                 stop()
             elif action in {"toggle_record", "gsr_toggle_record"}:
                 start("record", use_gsr=from_overlay or action == "gsr_toggle_record",
-                      window_handle=overlay_window if from_overlay else None)
+                      window_handle=window_handle)
             else:
                 status.set("Stop replay to change the capture source.")
         elif action in {"toggle_replay", "gsr_toggle_replay"}:
             if capture is None:
                 start("replay", use_gsr=from_overlay or action == "gsr_toggle_replay",
-                      window_handle=overlay_window if from_overlay else None)
+                      window_handle=window_handle)
             elif mode == "replay":
                 stop()
             else:
                 status.set("Replay is already active with this recording.")
         elif capture is not None:
             default = min(60, capture.seconds) if action == "save_short" else capture.seconds
-            save(replay_save_lengths.get(action, default), window_handle=overlay_window if from_overlay else None)
+            save(replay_save_lengths.get(action, default), window_handle=window_handle)
         else:
             status.set("Start replay or recording before saving a replay.")
 
@@ -857,6 +876,7 @@ def capture_controls(library, *, background=False):
     def close():
         nonlocal closing
         closing = True
+        pending_actions.clear()
         if not busy:
             if stream is not None:
                 submit("stream_stop", stream.stop)
@@ -884,8 +904,8 @@ def capture_controls(library, *, background=False):
                 close()
                 if not busy:
                     return
-            elif not closing and (tray_action == "toggle_overlay" or not busy):
-                handle_hotkey(tray_action)
+            elif not closing:
+                dispatch_hotkey(tray_action)
         try:
             action, value, error = results.get_nowait()
         except queue.Empty:
@@ -984,13 +1004,18 @@ def capture_controls(library, *, background=False):
         if hotkeys and not closing:
             try:
                 action = hotkeys.events.get_nowait()
-                if action == "toggle_overlay" or not busy:
-                    handle_hotkey(action)
+                dispatch_hotkey(action)
             except queue.Empty:
                 pass
 
         now = time.monotonic()
         if not closing:
+            while pending_actions and pending_actions[0][0] <= now:
+                pending_actions.popleft()
+                status.set("Capture command expired while the recorder was busy.")
+            if pending_actions and not busy:
+                _, callback = pending_actions.popleft()
+                callback()
             for kind, value in voice.read():
                 if kind == "status":
                     voice_status.set(value)
