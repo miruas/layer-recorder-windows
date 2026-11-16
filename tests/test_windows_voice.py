@@ -10,7 +10,7 @@ from katman.voice_control import (
     validate_config, words,
 )
 from katman.windows_capture import Capture, Display, Track
-from katman.windows_voice import SpeechGate, VoiceListener
+from katman.windows_voice import RecentCommands, SpeechGate, VoiceListener
 
 
 class VoiceCommandTests(unittest.TestCase):
@@ -96,6 +96,24 @@ class VoiceCommandTests(unittest.TestCase):
 
 
 class SpeechGateTests(unittest.TestCase):
+    def test_repeats_are_suppressed_across_different_commands(self):
+        recent = RecentCommands()
+        clip = VoiceMatch("save_replay", 30)
+        longer_clip = VoiceMatch("save_replay", 60)
+        self.assertTrue(recent.allow(clip, 10))
+        self.assertTrue(recent.allow(longer_clip, 11))
+        self.assertFalse(recent.allow(clip, 12))
+        self.assertTrue(recent.allow(clip, 12.5))
+        self.assertTrue(recent.allow(longer_clip, 13.5))
+
+    def test_an_enabled_empty_command_list_keeps_the_microphone_closed(self):
+        listener = VoiceListener()
+        with patch.object(listener, "_listen") as listen:
+            listener.configure(VoiceConfig(enabled=True, commands=()))
+            self.assertIsNone(listener._thread)
+            self.assertEqual(list(listener.read()), [("status", "Add a voice command to start listening.")])
+            listen.assert_not_called()
+
     def test_idle_noise_and_utterance_endpoint(self):
         gate = SpeechGate()
         for _ in range(500):

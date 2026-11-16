@@ -108,7 +108,7 @@ Webcam composition uses the GDI capture path and the configured video encoder. T
 4. Check **Enable voice control** and click **Apply**. Wait for the recorder to show that it is listening.
 5. Say the wake phrase followed by the command in one utterance. Voice Control keeps running in the notification area. To release the microphone and loaded recognition model, clear **Enable voice control** and apply.
 
-Voice Control starts disabled. It analyzes microphone samples in memory and uses a voice activity gate before running the local CPU decoder. GPU encoding remains available to the capture engine. The microphone audio used for recognizing commands stays off disk and is never sent to a recognition service. A microphone you independently enable as a recording track is saved with the recording.
+Voice Control starts disabled. It analyzes microphone samples in memory and uses a voice activity gate before running the local CPU decoder. If you delete all commands and apply, the listener releases the microphone and model until you add a command. GPU encoding remains available to the capture engine. The microphone audio used for recognizing commands stays off disk and is never sent to a recognition service. A microphone you independently enable as a recording track is saved with the recording.
 
 ### Built-in commands
 
@@ -129,7 +129,7 @@ Voice start and toggle use the same GSR action as **Alt+F9**. For example, a **R
 2. Use a fixed phrase for start, stop or toggle, such as `roll capture`. Each replay template needs exactly one `{duration}`, such as `clip {duration} of that`. The wake phrase goes in its own field.
 3. Save the command and click **Apply** to persist your changes. Command matching expects the whole phrase. Equivalent templates that differ only in capitalization or punctuation cannot be added twice.
 
-For `clip {duration} of that`, say “Kivo, clip one minute and ten seconds of that.” Positive whole-number durations and English hours, minutes, and seconds are supported. You can combine units from largest to smallest. Decimal durations are unsupported. Before saving, Layer checks both the configured buffer length and the actual retained video history. If the requested history is unavailable, wait for more footage or ask for a shorter clip. Immediate repetitions of the same recognized action and duration are suppressed.
+For `clip {duration} of that`, say “Kivo, clip one minute and ten seconds of that.” Positive whole-number durations and English hours, minutes, and seconds are supported. You can combine units from largest to smallest. Decimal durations are unsupported. Before saving, Layer checks both the configured buffer length and the actual retained video history. If the requested history is unavailable, wait for more footage or ask for a shorter clip. Layer suppresses repeats of the same action and duration for 2.5 seconds, even if another command runs in between.
 
 ## Livestream and take screenshots
 

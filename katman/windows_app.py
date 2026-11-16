@@ -526,7 +526,7 @@ def capture_controls(library, *, background=False):
 
     def apply_voice_config(config):
         nonlocal voice_config, voice_pending
-        if config.enabled:
+        if config.enabled and config.commands:
             try:
                 local_model()
             except RuntimeError as error:

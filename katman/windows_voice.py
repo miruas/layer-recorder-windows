@@ -17,6 +17,7 @@ MODEL_FILES = ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt")
 RATE = 16000
 FRAME = 480  # WebRTC VAD accepts 30 ms of 16-bit mono PCM.
 MIN_RMS = 24  # About -63 dBFS. Reject very low-level noise before running VAD.
+REPEAT_WINDOW = 2.5
 _MISSING_MODEL = "Install the English model in Voice Control settings before enabling it."
 
 
@@ -112,6 +113,24 @@ def wake_listener(frames):
         pass  # An existing packet already wakes the consumer.
 
 
+class RecentCommands:
+    """Suppress repeated actions, including repeats interleaved with other commands."""
+
+    def __init__(self):
+        self.emitted = {}
+
+    def allow(self, match, now):
+        while self.emitted:
+            oldest = next(iter(self.emitted))
+            if now - self.emitted[oldest] < REPEAT_WINDOW:
+                break
+            del self.emitted[oldest]
+        if match in self.emitted:
+            return False
+        self.emitted[match] = now
+        return True
+
+
 class VoiceListener:
     """One worker, one microphone. The UI only receives status and matched actions."""
 
@@ -138,6 +157,9 @@ class VoiceListener:
         config = self._config
         if config is None or not config.enabled:
             self.events.put((self._generation, "status", "Voice Control is off."))
+            return
+        if not config.commands:
+            self.events.put((self._generation, "status", "Add a voice command to start listening."))
             return
         self._stop = threading.Event()
         self._frames = queue.Queue(maxsize=40)
@@ -211,8 +233,7 @@ class VoiceListener:
         vad, gate = webrtcvad.Vad(3), SpeechGate()
         interrupted = threading.Event()
         finished = threading.Event()
-        last = None
-        last_time = 0.0
+        recent = RecentCommands()
 
         def on_audio(indata, frame_count, timestamp, status):
             if stop.is_set():
@@ -260,7 +281,5 @@ class VoiceListener:
                 if audio is None:
                     continue
                 match = matcher.match(recognize(model, audio, config.wake_phrase))
-                now = time.monotonic()
-                if match is not None and (match != last or now - last_time >= 2.5):
-                    last, last_time = match, now
+                if match is not None and recent.allow(match, time.monotonic()):
                     emit("command", match)
