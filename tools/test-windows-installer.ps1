@@ -19,7 +19,10 @@ $programs = Join-Path ([Environment]::GetFolderPath('Programs')) 'Layer Recorder
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Layer Recorder.lnk'
 
 function Read-Startup {
-    Get-ItemPropertyValue -LiteralPath $startupKey -Name LayerRecorder -ErrorAction SilentlyContinue
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
+    if ($key) {
+        try { $key.GetValue('LayerRecorder') } finally { $key.Dispose() }
+    }
 }
 
 function Run-Setup($name, [string[]]$options = @()) {
