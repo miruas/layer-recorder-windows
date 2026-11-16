@@ -182,7 +182,7 @@ def foreground_window():
     return user32.GetForegroundWindow()
 
 
-def gsr_h264_encoder(options, selected):
+def gsr_h264_encoder(options, selected, *, dimensions=None):
     """Resolve the GSR H.264 setting against the actual Windows encoder."""
     codec = options.get("video_codec", "auto") if isinstance(options, dict) else "auto"
     if codec == "h264_software":
@@ -190,15 +190,23 @@ def gsr_h264_encoder(options, selected):
     if codec not in GSR_H264_CODECS:
         raise ValueError("Windows livestreaming supports Auto, H.264 and H.264 Software. Select one in GSR.")
     if selected != "libx264":
+        if dimensions is not None and not video_encoder_available(selected, dimensions=dimensions):
+            width, height = dimensions
+            raise RuntimeError(f"{selected} could not encode {width}×{height}. Try a different encoder or size.")
         return selected
-    return next((encoder for encoder in H264_HARDWARE_ENCODERS if video_encoder_available(encoder)), selected)
+    return next((encoder for encoder in H264_HARDWARE_ENCODERS
+                 if video_encoder_available(encoder, dimensions=dimensions)), selected)
 
 
-def video_encoder_available(encoder, *, ten_bit=False):
+def video_encoder_available(encoder, *, ten_bit=False, dimensions=None):
     # Exercise the same pixel format, encoder options and fragmented MP4
-    # output as the GDI capture path, using a frame independent of the desktop.
-    command = capture_command(Display("Encoder probe", 0, 0, 640, 360), 60, encoder)
-    command[4:command.index("-an")] = ["-nostdin", "-f", "lavfi", "-i", "color=c=black:s=640x360:r=60"]
+    # output as the GDI capture path. Preserve small dimensions to detect
+    # hardware minimums and keep the normal probe small for large outputs.
+    width, height = dimensions or (640, 360)
+    width = min(width + width % 2, 640)
+    height = min(height + height % 2, 360)
+    command = capture_command(Display("Encoder probe", 0, 0, width, height), 60, encoder)
+    command[4:command.index("-an")] = ["-nostdin", "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:r=60"]
     codec_index = command.index("-c:v")
     command[codec_index:codec_index] = ["-frames:v", "1"]
     if ten_bit:
@@ -218,7 +226,7 @@ def gsr_ten_bit(options):
     return isinstance(options, dict) and options.get("video_codec") in ("hevc_10bit", "av1_10bit")
 
 
-def gsr_recording_encoder(options, selected, container, replay_container):
+def gsr_recording_encoder(options, selected, container, replay_container, *, dimensions=None):
     codec = options.get("video_codec") if isinstance(options, dict) else None
     if codec in ("hevc_hdr", "av1_hdr", "hevc_hdr_vulkan", "av1_hdr_vulkan"):
         raise ValueError("HDR capture is unavailable on Windows. Select an SDR codec in GSR.")
@@ -231,12 +239,13 @@ def gsr_recording_encoder(options, selected, container, replay_container):
         if "flv" in (container, replay_container):
             raise ValueError(f"Use MP4, MKV or MOV for {codec.upper()} recording and replay.")
         encoder = GSR_NVENC_RECORDING_CODECS[codec]
-        if not video_encoder_available(encoder, ten_bit=ten_bit):
-            raise RuntimeError(f"{codec.upper()} NVENC could not start on this device.")
+        if not video_encoder_available(encoder, ten_bit=ten_bit, dimensions=dimensions):
+            size = f" at {dimensions[0]}×{dimensions[1]}" if dimensions else ""
+            raise RuntimeError(f"{codec.upper()} NVENC could not start{size}. Try a different codec or size.")
         return encoder
     if codec not in GSR_H264_CODECS:
         raise ValueError("The configured video codec is unavailable on Windows. Select a supported codec in GSR.")
-    return gsr_h264_encoder(options, selected)
+    return gsr_h264_encoder(options, selected, dimensions=dimensions)
 
 
 def window_source(handle):

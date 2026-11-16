@@ -485,6 +485,9 @@ def capture_controls(library, *, background=False):
                             [*sources, *(item for item in last_audio_inventory if item.kind == "application")]}.values())
         if region is not None:
             selected = [region]
+        dimensions = resolution
+        if dimensions is None and selected:
+            dimensions = selected[0].width, selected[0].height
         follow_screens = follow_displays.get() and not chosen_monitor and region is None
         replay_save_lengths = save_lengths
         status.set("Starting capture…")
@@ -492,7 +495,8 @@ def capture_controls(library, *, background=False):
                                            foreground_window() if window_handle is None else window_handle)
                             if use_gsr and kind == "record" else None)
         submit("automatic_replay" if automatic else kind, lambda: Capture(recording_directory, selected, rate,
-                                     gsr_recording_encoder(record_options, codec, container, replay_container)
+                                     gsr_recording_encoder(record_options, codec, container, replay_container,
+                                                           dimensions=dimensions)
                                      if use_gsr else codec,
                                      seconds=seconds, record=kind == "record",
                                      audio=sources, follow_displays=follow_screens,
@@ -591,8 +595,10 @@ def capture_controls(library, *, background=False):
                 return stream_audio_sources(tracks, read_audio_inventory(), allow_missing=True)
 
             options = settings.get("record_options")
-            return Livestream(source, rate, gsr_h264_encoder(options, codec), destination, audio,
-                              resolution=video_resolution(options), cursor=video_cursor(options),
+            resolution = video_resolution(options)
+            dimensions = resolution or (source.width, source.height)
+            return Livestream(source, rate, gsr_h264_encoder(options, codec, dimensions=dimensions), destination, audio,
+                              resolution=resolution, cursor=video_cursor(options),
                               color_range=video_color_range(options), rate_control=video_rate_control(options),
                               framerate_mode=video_framerate_mode(options), webcam=gsr_webcam(options),
                               discover_audio=discover_audio if follow else None)

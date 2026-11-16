@@ -552,7 +552,7 @@ class ReplayTests(unittest.TestCase):
         options = {"video_codec": "av1"}
         with patch("katman.windows_capture.video_encoder_available", return_value=True) as available:
             self.assertEqual(gsr_recording_encoder(options, "libx264", "mp4", "matroska"), "av1_nvenc")
-            available.assert_called_once_with("av1_nvenc", ten_bit=False)
+            available.assert_called_once_with("av1_nvenc", ten_bit=False, dimensions=None)
             for container in ("mov", "flv"):
                 with self.assertRaisesRegex(ValueError, "MP4 or MKV"):
                     gsr_recording_encoder(options, "libx264", "mp4", container)
@@ -566,7 +566,7 @@ class ReplayTests(unittest.TestCase):
         options = {"video_codec": "hevc"}
         with patch("katman.windows_capture.video_encoder_available", return_value=True) as available:
             self.assertEqual(gsr_recording_encoder(options, "libx264", "mp4", "matroska"), "hevc_nvenc")
-            available.assert_called_once_with("hevc_nvenc", ten_bit=False)
+            available.assert_called_once_with("hevc_nvenc", ten_bit=False, dimensions=None)
             with self.assertRaisesRegex(ValueError, "MP4, MKV or MOV"):
                 gsr_recording_encoder(options, "libx264", "mp4", "flv")
             available.return_value = False
@@ -659,13 +659,27 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(gsr_h264_encoder({"video_codec": "auto"}, "libx264"), "libx264")
 
     def test_gsr_auto_selects_amf_then_quick_sync_before_software(self):
-        order = [call("h264_nvenc"), call("h264_amf"), call("h264_qsv")]
+        order = [call(encoder, dimensions=None) for encoder in ("h264_nvenc", "h264_amf", "h264_qsv")]
         for encoder, results in (("h264_amf", [False, True]), ("h264_qsv", [False, False, True]),
                                  ("libx264", [False, False, False])):
             with (self.subTest(encoder=encoder),
                   patch("katman.windows_capture.video_encoder_available", side_effect=results) as available):
                 self.assertEqual(gsr_h264_encoder({"video_codec": "auto"}, "libx264"), encoder)
                 self.assertEqual(available.call_args_list, order[:len(results)])
+
+    def test_small_capture_uses_its_dimensions_for_hardware_encoder_selection(self):
+        with patch("katman.windows_capture.subprocess.run", return_value=Mock(returncode=1)) as run:
+            dimensions = (127, 95)
+            self.assertEqual(gsr_h264_encoder({"video_codec": "auto"}, "libx264", dimensions=dimensions), "libx264")
+            self.assertEqual(run.call_count, 3)
+            for attempt in run.call_args_list:
+                self.assertIn("color=c=black:s=128x96:r=60", attempt.args[0])
+            with self.assertRaisesRegex(RuntimeError, "h264_nvenc could not encode 127×95"):
+                gsr_h264_encoder({"video_codec": "h264"}, "h264_nvenc", dimensions=dimensions)
+            with self.assertRaisesRegex(RuntimeError, "HEVC NVENC could not start at 127×95"):
+                gsr_recording_encoder({"video_codec": "hevc_10bit"}, "libx264", "mp4", "mp4",
+                                      dimensions=dimensions)
+            self.assertIn("p010le", run.call_args.args[0])
 
     def test_left_monitor_capture_uses_signed_origin(self):
         args = capture_command(Display("Left", -1280, -50, 1280, 720), 30, "libx264")
