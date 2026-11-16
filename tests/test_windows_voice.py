@@ -136,6 +136,20 @@ class SpeechGateTests(unittest.TestCase):
             self.assertIsNone(gate.push(b"q", False))
         self.assertFalse(gate.discarding)
 
+    def test_isolated_background_hits_do_not_prevent_an_endpoint(self):
+        gate = SpeechGate()
+        for _ in range(22):
+            self.assertIsNone(gate.push(b"s", True))
+        for index in range(22):
+            noise = index in (3, 8, 13, 18)
+            utterance = gate.push(b"n" if noise else b"q", noise)
+            if utterance is not None:
+                self.assertIn(b"s" * 22, utterance)
+                self.assertGreaterEqual(index, 17)
+                break
+        else:
+            self.fail("Intermittent background noise blocked the utterance endpoint.")
+
     def test_disable_and_reconfigure_drops_old_commands(self):
         listener = VoiceListener()
         starting = threading.Event()

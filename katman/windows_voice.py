@@ -73,6 +73,7 @@ class SpeechGate:
 
     def reset(self):
         self.history = deque(maxlen=10)
+        self.trailing_speech = deque(maxlen=22)
         self.frames = []
         self.quiet = self.voiced = 0
         self.discarding = False
@@ -95,11 +96,15 @@ class SpeechGate:
         self.frames.append(pcm)
         self.quiet = 0 if speech else self.quiet + 1
         self.voiced += speech
+        self.trailing_speech.append(speech)
         if len(self.frames) >= 300:
             self.frames.clear()
             self.discarding = True
             return None
-        if self.quiet < 18:
+        # A few isolated VAD hits in background noise need not postpone the endpoint.
+        mostly_quiet = (len(self.trailing_speech) == self.trailing_speech.maxlen
+                        and self.trailing_speech.count(False) >= 18)
+        if self.quiet < 18 and not mostly_quiet:
             return None
         audio = b"".join(self.frames[:-12]) if self.voiced >= 6 else None
         self.reset()
