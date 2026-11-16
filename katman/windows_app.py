@@ -990,10 +990,11 @@ def capture_controls(library, *, background=False):
                     if audio_error:
                         audio_message.set(audio_error)
                     if not count:
-                        warning = capture.warnings[-1] if capture.warnings else "Selected displays are disconnected."
-                        status.set(f"{warning} Waiting for a display.")
+                        waiting = ("Waiting for the selected window." if capture.fixed_windows
+                                   else "Waiting for a display.")
+                        status.set(f"{capture.warnings[-1]} {waiting}" if capture.warnings else waiting)
                     elif active_display_count == 0:
-                        status.set("Display capture resumed.")
+                        status.set("Window capture resumed." if capture.fixed_windows else "Display capture resumed.")
                     active_display_count = count
                     if capture.warnings:
                         audio_message.set(capture.warnings[-1])

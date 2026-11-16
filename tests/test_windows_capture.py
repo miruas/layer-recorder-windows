@@ -164,6 +164,35 @@ class ReplayTests(unittest.TestCase):
             finally:
                 capture.stop()
 
+    def test_wgc_window_restarts_capture_on_resize_and_retires_on_minimize(self):
+        original = Display("Selected window", 0, 0, 640, 480, window=123)
+        resized = Display("Selected window", 0, 0, 720, 500, window=123)
+        with (tempfile.TemporaryDirectory() as folder,
+              patch("katman.windows_capture.displays", return_value=[]),
+              patch("katman.windows_capture.shutil.which", return_value="ffmpeg"),
+              patch("katman.windows_capture.window_source", return_value=resized) as window_source,
+              patch("katman.windows_capture.CaptureEngine") as engine):
+            engine.return_value.request.side_effect = lambda op, **_: {"tracks": [
+                {"id": track_id, "count": 1, "end": 1} for track_id in (1, 2, 3)
+            ]} if op == "status" else None
+            capture = Capture(folder, [original], encoder="h264_nvenc", resolution=(640, 360))
+            try:
+                track = capture.active[original.key]
+                self.assertEqual(track.backend, "gfxcapture")
+                self.assertEqual(capture.reconcile([]), 1)
+                self.assertTrue(track.stopped)
+                replacement = capture.active[original.key]
+                self.assertEqual(replacement.source, resized)
+                self.assertEqual(replacement.backend, "gfxcapture")
+                window_source.side_effect = RuntimeError("Window is minimized")
+                self.assertEqual(capture.reconcile([]), 0)
+                self.assertTrue(replacement.stopped)
+                window_source.side_effect = None
+                self.assertEqual(capture.reconcile([]), 1)
+                self.assertIsNot(capture.active[original.key], replacement)
+            finally:
+                capture.stop()
+
     def test_capture_notifications_follow_the_respective_gsr_profiles(self):
         settings = {
             "record": {"record_options": {"show_notifications": False}},
